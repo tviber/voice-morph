@@ -48,7 +48,7 @@ jobs:
           case '${{ matrix.name }}' in
             macOS)
               dir=build/darwin-universal
-              lipo -verify_arch x86_64 arm64 "$dir/VoiceMorph.app/Contents/MacOS/VoiceMorph"
+              lipo "$dir/VoiceMorph.app/Contents/MacOS/VoiceMorph" -verify_arch x86_64 arm64
               codesign --verify --deep --strict "$dir/VoiceMorph.app"
               hdiutil verify "$dir"/*.dmg
               cp "$dir"/*.dmg installers/ ;;
