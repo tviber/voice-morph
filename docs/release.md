@@ -1,4 +1,10 @@
-# 发布 macOS 安装包
+# 发布桌面安装包
+
+将 `mygo.config.ts` 的版本改为目标版本，并同步 macOS 的版本字段。合入 `main` 后，在该提交上推送同名的 `v` 标签，例如 `v0.1.0-beta.1`。GitHub Actions 会构建 macOS、Windows 和 Linux 安装包，全部成功后上传到对应 Release、生成 SHA-256 校验清单并公开。带预发布后缀的标签会标记为 Pre-release。维护者可提前准备同标签的草稿及发布说明。失败后可在 Actions 重跑失败的作业。
+
+CI 当前分发 ad-hoc 签名的 macOS 包和未签名的 Windows 包。若要分发经过 Apple 公证的版本，按下文构建，并在发布流程中使用公证后的文件。
+
+## 在 macOS 构建机签名与公证
 
 在 macOS 构建机上安装 Go、Bun 和 Xcode 命令行工具。将 Developer ID Application 证书及私钥导入钥匙串，用 `xcrun notarytool store-credentials voicemorph` 保存 Apple 公证凭据。私钥和凭据留在钥匙串中。
 

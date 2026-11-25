@@ -16,7 +16,7 @@ VoiceMorph 单独向虚拟设备写入处理后的双声道音频，系统输出
 
 ## 下载和许可
 
-[GitHub Releases](https://github.com/tviber/voice-morph/releases) 提供发布信息。正式签名的通用 DMG 同时支持 Apple Silicon 和 Intel，打开后将 VoiceMorph 拖入 Applications。源码可查阅和自用修改，允许使用软件制作收费课程和商业视频；再分发软件、转售或托管服务需要书面授权。完整条款见 [LICENSE](LICENSE)。
+[GitHub Releases](https://github.com/tviber/voice-morph/releases) 提供 macOS 通用 DMG、Windows 安装程序，以及 Linux 的 DEB、RPM 和 tar.gz。Windows 和 Linux 均支持 x64 与 ARM64。每个版本附带 `SHA256SUMS`。当前自动构建的 macOS 包使用 ad-hoc 签名，Windows 包未签名。源码可查阅和自用修改，允许使用软件制作收费课程和商业视频；再分发软件、转售或托管服务需要书面授权。完整条款见 [LICENSE](LICENSE)。
 
 ## MorphVOX Pro 的调参模型（分析）
 
@@ -117,5 +117,4 @@ bun test                        # 前端流式队列 / monitor 生命周期测�
 
 ## 预留但暂未实现
 
-- Windows / Linux 打包（mygo `-platform windows|linux`；代码本身无平台依赖，WebAudio 路径通用）
 - 降噪门、Voice Doctor 向导、回声/键盘音效

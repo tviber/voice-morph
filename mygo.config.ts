@@ -16,8 +16,7 @@ export default defineConfig({
   out: "build",
   resources: ["LICENSE"],
   macos: {
-    // v1 targets macOS on Intel and Apple Silicon (darwin/universal);
-    // windows/linux builds are left for later.
+    // One universal disk image for Intel and Apple Silicon.
     minimumSystemVersion: "13.0",
     entitlements: "packaging/microphone.plist",
     signingIdentity: process.env.VOICEMORPH_SIGN_IDENTITY,

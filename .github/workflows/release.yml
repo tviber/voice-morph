@@ -1,0 +1,102 @@
+name: Desktop installers
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Package ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, targets: 'darwin/universal' }
+          - { name: Windows, os: ubuntu-latest, targets: 'windows/amd64,windows/arm64' }
+          - { name: Linux, os: ubuntu-latest, targets: 'linux/amd64,linux/arm64' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - run: bun install --frozen-lockfile
+      - name: Match tag to application version
+        if: github.event_name == 'push'
+        run: test "$GITHUB_REF_NAME" = "v$(bun -p '(await import("./mygo.config.ts")).default.version')"
+      - name: Install Windows packager
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update -qq && sudo apt-get install -y nsis
+      - name: Build installers
+        run: go run -mod=mod github.com/egoist/mygo/cmd/mygo build -platform '${{ matrix.targets }}'
+      - name: Check and stage installers
+        shell: bash
+        run: |
+          set -eu
+          mkdir installers
+          case '${{ matrix.name }}' in
+            macOS)
+              dir=build/darwin-universal
+              lipo -verify_arch x86_64 arm64 "$dir/VoiceMorph.app/Contents/MacOS/VoiceMorph"
+              codesign --verify --deep --strict "$dir/VoiceMorph.app"
+              hdiutil verify "$dir"/*.dmg
+              cp "$dir"/*.dmg installers/ ;;
+            Windows)
+              for arch in amd64 arm64; do cp build/windows-"$arch"/*-setup-*.exe installers/; done ;;
+            Linux)
+              for arch in amd64 arm64; do
+                dir=build/linux-$arch
+                dpkg-deb --info "$dir"/*.deb
+                tar -tzf "$dir"/*.tar.gz > /dev/null
+                cp "$dir"/*.deb "$dir"/*.rpm "$dir"/*.tar.gz installers/
+              done ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          path: installers/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: installers
+      - name: Publish complete release
+        working-directory: installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          tag=$GITHUB_REF_NAME
+          sha256sum ./* > SHA256SUMS
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --draft --title "VoiceMorph ${tag#v}" --generate-notes
+          fi
+          test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
+          gh release upload "$tag" ./* --clobber
+          if [[ $tag == *-* ]]; then
+            gh release edit "$tag" --prerelease --latest=false --draft=false
+          else
+            gh release edit "$tag" --prerelease=false --draft=false
+          fi
