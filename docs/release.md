@@ -16,9 +16,9 @@ codesign --verify --deep --strict VoiceMorph.app
 codesign -dv --verbose=4 VoiceMorph.app
 spctl --assess --type execute --verbose=2 VoiceMorph.app
 xcrun stapler validate VoiceMorph.app
-xcrun stapler validate voicemorph-0.2.0.dmg
-hdiutil verify voicemorph-0.2.0.dmg
-shasum -a 256 voicemorph-0.2.0.dmg > SHA256SUMS
+xcrun stapler validate voicemorph-0.1.0-beta.1.dmg
+hdiutil verify voicemorph-0.1.0-beta.1.dmg
+shasum -a 256 voicemorph-0.1.0-beta.1.dmg > SHA256SUMS
 ```
 
-确认 `Authority` 为预期的 Developer ID、Gatekeeper 返回 `accepted`，并进行 BlackHole 2ch 试录。在 GitHub 草稿中上传公证后的 DMG 和校验文件，移除候选测试包，核对标签目标与构建提交，再发布正式 Release。
+确认 `Authority` 为预期的 Developer ID、Gatekeeper 返回 `accepted`，并进行 BlackHole 2ch 试录。在 GitHub 草稿中上传公证后的 DMG 和校验文件，移除候选测试包。发布 Beta 时使用 `v0.1.0-beta.1` 格式的标签，勾选 **Set as a pre-release**，并核对标签目标与构建提交。
