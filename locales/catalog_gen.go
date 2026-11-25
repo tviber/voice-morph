@@ -204,6 +204,76 @@ func (msgs Messages) Output() string {
 	return Catalog.Format(msgs.locale, "output", nil)
 }
 
+// RouteLabel says "输出到"
+// in the language the app shows.
+func RouteLabel() string { return In(i18n.Locale()).RouteLabel() }
+
+// RouteLabel says "输出到"
+// in the language of msgs.
+func (msgs Messages) RouteLabel() string {
+	return Catalog.Format(msgs.locale, "routeLabel", nil)
+}
+
+// RouteLocal says "耳机或扬声器"
+// in the language the app shows.
+func RouteLocal() string { return In(i18n.Locale()).RouteLocal() }
+
+// RouteLocal says "耳机或扬声器"
+// in the language of msgs.
+func (msgs Messages) RouteLocal() string {
+	return Catalog.Format(msgs.locale, "routeLocal", nil)
+}
+
+// RouteHelp says "将系统输入设为实体麦克风，在 OBS、screenframes 或会议软件中选择 BlackHole 2ch 作为麦克风。"
+// in the language the app shows.
+func RouteHelp() string { return In(i18n.Locale()).RouteHelp() }
+
+// RouteHelp says "将系统输入设为实体麦克风，在 OBS、screenframes 或会议软件中选择 BlackHole 2ch 作为麦克风。"
+// in the language of msgs.
+func (msgs Messages) RouteHelp() string {
+	return Catalog.Format(msgs.locale, "routeHelp", nil)
+}
+
+// RouteInstall says "获取 BlackHole 2ch"
+// in the language the app shows.
+func RouteInstall() string { return In(i18n.Locale()).RouteInstall() }
+
+// RouteInstall says "获取 BlackHole 2ch"
+// in the language of msgs.
+func (msgs Messages) RouteInstall() string {
+	return Catalog.Format(msgs.locale, "routeInstall", nil)
+}
+
+// RouteActive says "正在向 BlackHole 2ch 输出"
+// in the language the app shows.
+func RouteActive() string { return In(i18n.Locale()).RouteActive() }
+
+// RouteActive says "正在向 BlackHole 2ch 输出"
+// in the language of msgs.
+func (msgs Messages) RouteActive() string {
+	return Catalog.Format(msgs.locale, "routeActive", nil)
+}
+
+// RouteFailed says "无法输出到 BlackHole 2ch。请确认已安装 2ch 驱动，然后重新启动监听。"
+// in the language the app shows.
+func RouteFailed() string { return In(i18n.Locale()).RouteFailed() }
+
+// RouteFailed says "无法输出到 BlackHole 2ch。请确认已安装 2ch 驱动，然后重新启动监听。"
+// in the language of msgs.
+func (msgs Messages) RouteFailed() string {
+	return Catalog.Format(msgs.locale, "routeFailed", nil)
+}
+
+// RouteFeedback says "请先在 macOS 声音设置中选择实体麦克风作为输入。"
+// in the language the app shows.
+func RouteFeedback() string { return In(i18n.Locale()).RouteFeedback() }
+
+// RouteFeedback says "请先在 macOS 声音设置中选择实体麦克风作为输入。"
+// in the language of msgs.
+func (msgs Messages) RouteFeedback() string {
+	return Catalog.Format(msgs.locale, "routeFeedback", nil)
+}
+
 // Latency says "引擎延迟 ~{ms}ms"
 // in the language the app shows.
 func Latency(ms string) string { return In(i18n.Locale()).Latency(ms) }

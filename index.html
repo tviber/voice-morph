@@ -66,6 +66,14 @@
               </div>
             </div>
             <canvas id="scope" height="86"></canvas>
+            <div id="routing" hidden>
+              <label for="route" data-i18n="routeLabel">输出到</label>
+              <select id="route"><option value="local" data-i18n="routeLocal">耳机或扬声器</option><option value="virtual">BlackHole 2ch</option></select>
+              <div id="route-guide" hidden>
+                <p class="meta" data-i18n="routeHelp">将系统输入设为实体麦克风，并在录制软件中选择 BlackHole 2ch 作为麦克风。</p>
+                <button class="btn ghost sm" id="blackhole-guide" data-i18n="routeInstall">获取 BlackHole 2ch</button>
+              </div>
+            </div>
             <p id="mic-status" class="meta dim"></p>
             <p id="rt-stats" class="meta dim" hidden></p>
           </div>

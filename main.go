@@ -62,7 +62,8 @@ const staleChunkPrefix = "voicemorph: stale chunk"
 
 // Morpher is the bound service: the page calls these methods.
 type Morpher struct {
-	eng *engine.Engine
+	eng     *engine.Engine
+	virtual virtualOutput
 
 	// Chunk protocol state. mygo runs every bound call on its own
 	// goroutine and the JS sender abandons an IPC wait on timeout while
@@ -117,6 +118,7 @@ func (m *Morpher) ApplyPreset(id string) (engine.Params, error) {
 func (m *Morpher) ResetStream() int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closeVirtualLocked()
 	m.issued++
 	m.curStream = m.issued * streamSpan
 	m.lastSeq = -1
@@ -167,6 +169,13 @@ func (m *Morpher) ProcessChunk(streamID int64, seq int64, pcm string) (string, e
 	}
 	out := m.eng.Process(in)
 	m.lastSeq = seq
+	if m.virtual != nil {
+		if err := m.virtual.write(out); err != nil {
+			// Keep the failed route until Stop/Reset so subsequent calls cannot
+			// silently fall back to local playback.
+			return "", fmt.Errorf("voicemorph: virtual output: %w", err)
+		}
+	}
 	buf := make([]byte, len(out)*4)
 	for i, v := range out {
 		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))

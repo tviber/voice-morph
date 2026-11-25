@@ -4,6 +4,7 @@ import type { MonitorResources } from "./monitor-queue";
 import { Channel, isCallError, onLocaleChange } from "mygo-runtime";
 import { messages, messagesIn, type Messages } from "./locales";
 import type { Params, State } from "./mygo";
+import { Morpher } from "./mygo";
 const workletUrl = "worklet.js"; // served from public/ beside index.html
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -16,7 +17,7 @@ let sendTimer: number | undefined;
 let text: Messages = messages;
 let languageTag = "zh-Hans";
 let activePreset = "normal";
-let currentMicStatus: "off" | "on" | "mock" | "error" | "fileDone" | "fileError" = "off";
+let currentMicStatus: "off" | "on" | "virtual" | "routeFailed" | "mock" | "error" | "fileDone" | "fileError" = "off";
 let micDetail = "";
 let fileSummary: { seconds: string; input: string; output: string } | null = null;
 
@@ -25,6 +26,8 @@ function showMicStatus(kind: typeof currentMicStatus, detail = "") {
   micDetail = detail;
   const el = $("#mic-status");
   el.textContent = kind === "off" ? text.micOff()
+    : kind === "virtual" ? text.routeActive()
+    : kind === "routeFailed" ? text.routeFailed()
     : kind === "on" ? text.micOn()
     : kind === "mock" ? text.micMock()
     : kind === "error" ? text.micError(detail)
@@ -61,6 +64,8 @@ const PRESET_GLYPH: Record<string, string> = {
   "natural-woman": "❁", "natural-child": "✧",
 };
 const EN_HINTS: Record<string, string> = {
+  "warm-lecture": "Soft, warm delivery for longer lessons", "clear-demo": "Brighter consonants for walkthroughs",
+  "studio-narration": "Fuller, steadier narration", "casual-talk": "Light and expressive for Q&A",
   normal: "Unprocessed", low: "Lower pitch", giant: "Low and wide", demon: "Deep formants",
   woman: "Higher and lighter", high: "Pitch up", child: "High pitch and formants",
   chipmunk: "Extreme high voice", "natural-woman": "Soft voice",
@@ -115,7 +120,7 @@ function renderPresets() {
       <span class="glyph">${PRESET_GLYPH[p.id] ?? "●"}</span>
       <span class="p-name">${languageTag === "en" ? p.name : `${p.nameZh} <small>${p.name}</small>`}${p.experimental ? `<em class="exp">${text.experimental()}</em>` : ""}</span>
       <span class="p-sub">${languageTag === "en" ? EN_HINTS[p.id] ?? "" : p.hint}</span>
-      <span class="p-vals">${p.params.speech ? `F0 ${p.params.targetF0 || text.auto()}` : `P${fmt(p.params.pitch)}`} T${fmt(p.params.timbre)}</span>`;
+      <span class="p-vals">${p.params.targetF0 ? `F0 ${p.params.targetF0}` : `P${fmt(p.params.pitch)}`} T${fmt(p.params.timbre)}</span>`;
     b.onclick = async () => {
       params = await bridge.applyPreset(p.id);
       activePreset = p.id;
@@ -321,6 +326,13 @@ async function setupMonitor(
   streamBase: number,
   isLive: () => boolean,
 ): Promise<void> {
+  const virtual = $<HTMLSelectElement>("#route").value === "virtual";
+  if (virtual) {
+    try { await Morpher.startVirtualMic(streamBase); }
+    catch { throw new Error("voicemorph: route unavailable"); }
+    res.releaseOutput = () => { void Morpher.stopVirtualMic(streamBase).catch(console.error); };
+    if (!isLive()) return;
+  }
   const ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
   res.ctx = ctx;
   await ctx.audioWorklet.addModule(workletUrl);
@@ -333,6 +345,9 @@ async function setupMonitor(
     },
   });
   res.stream = stream;
+  if (virtual && stream.getAudioTracks().some((track) => /BlackHole/i.test(track.label))) {
+    throw new Error(text.routeFeedback());
+  }
   const src = ctx.createMediaStreamSource(stream);
   const node = new AudioWorkletNode(ctx, "duplex", { outputChannelCount: [1] });
   res.node = node;
@@ -356,13 +371,17 @@ async function setupMonitor(
           if (isCallError(err) && err.message.startsWith("voicemorph: stale")) {
             return STALE;
           }
+          if (virtual && isLive() && isCallError(err) && err.message.startsWith("voicemorph: virtual output")) {
+            stopMonitor();
+            showMicStatus("routeFailed");
+          }
           throw err;
         }
       },
       onOutput: (outB64) => {
         const out = b64ToF32(outB64);
         outLevel = rms(out);
-        node.port.postMessage(out, [out.buffer]);
+        if (!virtual) node.port.postMessage(out, [out.buffer]);
       },
       onCounts: () => showRtStats(),
     },
@@ -388,21 +407,28 @@ async function setupMonitor(
 
 function stopMonitor() {
   monitor.stop(); // bumps the generation: queued + in-flight work dies
+  $<HTMLSelectElement>("#route").disabled = false;
+  $("#monitor").textContent = text.monitorStart();
+  $("#monitor").classList.remove("live");
   $("#rt-stats").hidden = true;
 }
 
 function bindMonitor() {
+  const route = $<HTMLSelectElement>("#route");
+  $("#routing").hidden = !inApp || !state.platform.startsWith("darwin/");
+  route.onchange = () => { $("#route-guide").hidden = route.value !== "virtual"; };
+  $("#blackhole-guide").onclick = () => { void Morpher.blackHoleGuide().catch(console.error); };
+  window.addEventListener("pagehide", stopMonitor);
   $("#monitor").addEventListener("click", async () => {
     if (monitor.running || monitor.pending) {
       // running → stop; pending → cancel the in-flight start (its
       // attempt resolves "stale" and releases its own devices)
       stopMonitor();
-      $("#monitor").textContent = text.monitorStart();
-      $("#monitor").classList.remove("live");
       showMicStatus("off");
       return;
     }
     try {
+      route.disabled = true;
       $("#monitor").textContent = text.monitorStarting(); // click again to cancel
       const r = await monitor.start({
         resetStream: () => bridge.resetStream(),
@@ -416,11 +442,12 @@ function bindMonitor() {
       }
       $("#monitor").textContent = text.monitorStop();
       $("#monitor").classList.add("live");
-      showMicStatus(inApp ? "on" : "mock");
+      showMicStatus(route.value === "virtual" ? "virtual" : inApp ? "on" : "mock");
       showRtStats();
     } catch (err) {
+      route.disabled = false;
       $("#monitor").textContent = text.monitorStart();
-      showMicStatus("error", (err as Error).message);
+      showMicStatus((err as Error).message === "voicemorph: route unavailable" ? "routeFailed" : "error", (err as Error).message);
     }
   });
 }

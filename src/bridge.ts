@@ -40,6 +40,10 @@ function mockParams(overrides: Partial<Params> = {}): Params {
 
 const mockPresets: Preset[] = [
   { id: "normal", name: "Normal", nameZh: "原声", hint: "不处理", params: mockParams() },
+  { id: "warm-lecture", name: "Warm Lecture", nameZh: "温暖讲堂", hint: "稍低、柔和，适合长课", params: mockParams({ speech: true, pitch: -0.08, pitchRange: 0.95, timbre: -0.09, strength: 0.8, gain: 0.95, eqPost: [-3,-2,0,1,0,0,0.5,0,0,0] }) },
+  { id: "clear-demo", name: "Clear Demo", nameZh: "清晰演示", hint: "稍亮，突出操作讲解中的字音", params: mockParams({ speech: true, pitch: 0.055, timbre: 0.075, strength: 0.85, gain: 0.94, eqPost: [-4,-2,-1,-0.5,0,0,1,1.5,0,0] }) },
+  { id: "studio-narration", name: "Studio Narration", nameZh: "沉稳旁白", hint: "略厚、语调平稳，适合视频旁白", params: mockParams({ speech: true, pitch: -0.12, pitchRange: 0.9, timbre: -0.12, strength: 0.85, gain: 0.94, eqPost: [-4,-2,0.5,0,-1,0,1.5,0.5,0,0] }) },
+  { id: "casual-talk", name: "Casual Talk", nameZh: "轻松对谈", hint: "轻盈，保留问答的语调起伏", params: mockParams({ speech: true, pitch: 0.09, pitchRange: 1.04, timbre: -0.045, strength: 0.75, gain: 0.97, eqPost: [-2,-1,0,0,-0.5,1,0.5,0,0,0] }) },
   { id: "low", name: "Low", nameZh: "低沉", hint: "低半档音高", params: mockParams({ pitch: -0.5 }) },
   { id: "giant", name: "Giant", nameZh: "巨人", hint: "又低又宽", params: mockParams({ pitch: -0.5, timbre: -0.3 }) },
   { id: "demon", name: "Demon", nameZh: "恶魔", hint: "极低共振峰", params: mockParams({ pitch: -0.8, timbre: -0.5 }) },
@@ -72,7 +76,7 @@ const mock: Bridge = {
     return tag;
   },
   setParams: async () => {},
-  applyPreset: async (id) => mockPresets.find((p) => p.id === id)!.params,
+  applyPreset: async (id) => structuredClone(mockPresets.find((p) => p.id === id)!.params),
   // dry pass-through in the browser preview
   processChunk: async (_streamID, _seq, pcm) => pcm,
   processFile: async () => ({ seconds: 0, inHz: 48000, outHz: 48000, elapsed: 0 }),

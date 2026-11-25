@@ -4,6 +4,20 @@
 
 ![tech](https://img.shields.io/badge/stack-Go%201.27%20%C2%B7%20MyGo%20%C2%B7%20Bun%2FVite%20%C2%B7%20WebAudio-d97757)
 
+## 在 OBS、screenframes、会议软件里使用变声麦克风
+
+1. 在 macOS 13 或更新版本上安装 [BlackHole 2ch](https://existential.audio/blackhole/)。安装后重新打开 VoiceMorph 和录制软件。
+2. 在 macOS「声音 → 输入」选择实体麦克风。打开 VoiceMorph，在「信号 → 输出到」选择 **BlackHole 2ch**，选好预设后点击「开始监听」。
+3. 在 OBS 添加「音频输入采集」，或在 screenframes、会议软件的麦克风设置中选择 **BlackHole 2ch**。关闭录制软件里的其他麦克风轨，以免同时录入原声。先试录一句并回放检查。
+
+VoiceMorph 单独向虚拟设备写入处理后的双声道音频，系统输出仍可用耳机播放其他声音。要在本机试听，停止监听后将输出改为耳机。BlackHole 由用户从官方渠道单独安装。
+
+录课可以从 **温暖讲堂**（长课）、**清晰演示**（操作解说）、**沉稳旁白**（后期讲解）或 **轻松对谈**（问答）开始。这四套预设跟随说话人的音域，轻调音高、共振峰和均衡。熟悉你的人仍可能通过口音、语调或用词认出你。
+
+## 下载和许可
+
+[GitHub Releases](https://github.com/tviber/voice-morph/releases) 提供发布信息。正式签名的通用 DMG 同时支持 Apple Silicon 和 Intel，打开后将 VoiceMorph 拖入 Applications。源码可查阅和自用修改，允许使用软件制作收费课程和商业视频；再分发软件、转售或托管服务需要书面授权。完整条款见 [LICENSE](LICENSE)。
+
 ## MorphVOX Pro 的调参模型（分析）
 
 MorphVOX Pro 的核心是 Tweak Panel 上的三个参数 + 两段 EQ：
@@ -77,17 +91,17 @@ mygo.config.ts     macOS 打包配置（universal = intel + Apple Silicon）
 
 ## 构建 macOS 版（Intel + M 芯片通用包）
 
-前置：Go ≥ 1.27.3、Bun。MyGo Go 库、CLI 和前端 runtime 均固定在 0.9.0。在 Mac 上：
+前置：Go ≥ 1.27.3、Bun。MyGo Go 库、CLI 和前端 runtime 均固定在 0.10.0。在 Mac 上：
 
 ```bash
 bun install
 bun run generate                   # 生成 src/mygo.ts、src/locales.ts 和 Go 语言目录
 bun run build:web                  # 前端 → dist/
-bun run build -- -platform darwin/universal
+bun run build -platform darwin/universal
 # 产物：build/ 下的 macOS 应用与安装包（universal 合并 arm64 和 amd64）
 ```
 
-非 Mac 机器也可 `GOOS=darwin go build` 交叉验证二进制（本项目已是纯 Go 无依赖）。
+本地包默认使用 ad-hoc 签名。对外发布时按 [签名及发布步骤](docs/release.md) 使用 Developer ID 并经 Apple 公证。
 
 ## 开发
 
@@ -104,5 +118,4 @@ bun test                        # 前端流式队列 / monitor 生命周期测�
 ## 预留但暂未实现
 
 - Windows / Linux 打包（mygo `-platform windows|linux`；代码本身无平台依赖，WebAudio 路径通用）
-- 系统级虚拟麦克风（把变声输出喂给其它应用）—— 需要 VB-Cable/BlackHole 类内核驱动，超出纯 Go webview 范围
 - 降噪门、Voice Doctor 向导、回声/键盘音效

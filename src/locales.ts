@@ -72,6 +72,34 @@ export interface Messages {
    */
   output(): string;
   /**
+   * `输出到`
+   */
+  routeLabel(): string;
+  /**
+   * `耳机或扬声器`
+   */
+  routeLocal(): string;
+  /**
+   * `将系统输入设为实体麦克风，在 OBS、screenframes 或会议软件中选择 BlackHole 2ch 作为麦克风。`
+   */
+  routeHelp(): string;
+  /**
+   * `获取 BlackHole 2ch`
+   */
+  routeInstall(): string;
+  /**
+   * `正在向 BlackHole 2ch 输出`
+   */
+  routeActive(): string;
+  /**
+   * `无法输出到 BlackHole 2ch。请确认已安装 2ch 驱动，然后重新启动监听。`
+   */
+  routeFailed(): string;
+  /**
+   * `请先在 macOS 声音设置中选择实体麦克风作为输入。`
+   */
+  routeFeedback(): string;
+  /**
    * `引擎延迟 ~{ms}ms`
    */
   latency(ms: string): string;
@@ -278,6 +306,13 @@ const catalog = createCatalog<Messages>({
     "signal": [],
     "input": [],
     "output": [],
+    "routeLabel": [],
+    "routeLocal": [],
+    "routeHelp": [],
+    "routeInstall": [],
+    "routeActive": [],
+    "routeFailed": [],
+    "routeFeedback": [],
     "latency": ["ms"],
     "tweak": [],
     "reset": [],
@@ -343,6 +378,13 @@ const catalog = createCatalog<Messages>({
       "signal": "信号",
       "input": "输入",
       "output": "输出",
+      "routeLabel": "输出到",
+      "routeLocal": "耳机或扬声器",
+      "routeHelp": "将系统输入设为实体麦克风，在 OBS、screenframes 或会议软件中选择 BlackHole 2ch 作为麦克风。",
+      "routeInstall": "获取 BlackHole 2ch",
+      "routeActive": "正在向 BlackHole 2ch 输出",
+      "routeFailed": "无法输出到 BlackHole 2ch。请确认已安装 2ch 驱动，然后重新启动监听。",
+      "routeFeedback": "请先在 macOS 声音设置中选择实体麦克风作为输入。",
       "latency": "引擎延迟 ~{ms}ms",
       "tweak": "调参面板",
       "reset": "重置",
@@ -407,6 +449,13 @@ const catalog = createCatalog<Messages>({
       "signal": "Signal",
       "input": "Input",
       "output": "Output",
+      "routeLabel": "Send audio to",
+      "routeLocal": "Headphones or speakers",
+      "routeHelp": "Use a physical microphone as your Mac input. Select BlackHole 2ch as the microphone in OBS, screenframes or your meeting app.",
+      "routeInstall": "Get BlackHole 2ch",
+      "routeActive": "Sending audio to BlackHole 2ch",
+      "routeFailed": "BlackHole 2ch output unavailable. Check that the 2ch driver is installed and restart monitoring.",
+      "routeFeedback": "Choose a physical microphone in macOS Sound settings first.",
       "latency": "Engine latency ~{ms}ms",
       "tweak": "Voice controls",
       "reset": "Reset",

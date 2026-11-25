@@ -1,0 +1,27 @@
+name: BlackHole output
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  device:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install BlackHole 2ch on the runner
+        run: |
+          brew install --cask blackhole-2ch
+          sudo launchctl kickstart -k system/com.apple.audio.coreaudiod
+          for attempt in {1..20}; do
+            if system_profiler SPAudioDataType | grep -q 'BlackHole 2ch'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Send live audio blocks to the driver
+        env:
+          VOICEMORPH_TEST_BLACKHOLE: installed
+          CGO_ENABLED: '0'
+        run: go test -v -run '^TestBlackHoleDevice$' .

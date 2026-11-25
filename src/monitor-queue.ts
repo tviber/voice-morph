@@ -209,6 +209,7 @@ export class ChunkSender {
  * AudioWorkletNode all satisfy them.
  */
 export interface MonitorResources {
+  releaseOutput?: () => void;
   ctx?: { close(): unknown };
   stream?: { getTracks(): { stop(): void }[] };
   node?: { disconnect(): void };
@@ -235,6 +236,7 @@ export interface MonitorStartDeps {
 
 /** Tear down a partial or committed session — never touches shared state. */
 function releaseMonitor(res: MonitorResources): void {
+  res.releaseOutput?.();
   try {
     res.node?.disconnect();
   } catch {
