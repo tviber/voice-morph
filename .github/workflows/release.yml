@@ -59,7 +59,11 @@ jobs:
                 dir=build/linux-$arch
                 dpkg-deb --info "$dir"/*.deb
                 tar -tzf "$dir"/*.tar.gz > /dev/null
-                cp "$dir"/*.deb "$dir"/*.rpm "$dir"/*.tar.gz installers/
+                # GitHub replaces tildes in asset names; use the download name for checksums.
+                for file in "$dir"/*.deb "$dir"/*.rpm "$dir"/*.tar.gz; do
+                  name=${file##*/}
+                  cp "$file" "installers/${name//\~/.}"
+                done
               done ;;
           esac
       - uses: actions/upload-artifact@v4
