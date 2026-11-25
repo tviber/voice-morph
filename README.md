@@ -1,6 +1,6 @@
 # VoiceMorph 变声工坊
 
-MorphVOX Pro 风格的实时变声器 —— Go DSP 引擎 + Web 前端 + MyGo 桌面壳。
+一款专注于实时监听和音频文件变声的桌面软件 —— Go DSP 引擎 + Web 前端 + MyGo 桌面壳。
 
 ![tech](https://img.shields.io/badge/stack-Go%201.27%20%C2%B7%20MyGo%20%C2%B7%20Bun%2FVite%20%C2%B7%20WebAudio-d97757)
 
@@ -71,20 +71,20 @@ testdata/          两条 CMU Arctic 真实语音（含许可证与来源说明�
 docs/              evaluation.md 与神经变声对比实验记录
 src/               前端（Vite + TS）：main.ts UI 逻辑、bridge.ts IPC/mock、style.css
 public/worklet.js  AudioWorklet：采集 2048 采样块 ↔ 播放回写
-index.html         Claude 风格布局（暖纸底 + 衬线 + 珊瑚橙）
+index.html         实时变声与音频文件变声界面
 mygo.config.ts     macOS 打包配置（universal = intel + Apple Silicon）
 ```
 
 ## 构建 macOS 版（Intel + M 芯片通用包）
 
-前置：Go ≥ 1.25、bun（或 npm）。在 Mac 上：
+前置：Go ≥ 1.27.3、Bun。MyGo Go 库、CLI 和前端 runtime 均固定在 0.9.0。在 Mac 上：
 
 ```bash
 bun install
-go run github.com/egoist/mygo/cmd/mygo@latest generate   # 生成 src/mygo.ts 绑定
-bun run build:web                                        # 前端 → dist/
-go run github.com/egoist/mygo/cmd/mygo@latest build -platform darwin/universal
-# 产物：build/VoiceMorph.app + .dmg（arm64+amd64 lipo 合一，需 macOS 上运行 lipo/签名）
+bun run generate                   # 生成 src/mygo.ts、src/locales.ts 和 Go 语言目录
+bun run build:web                  # 前端 → dist/
+bun run build -- -platform darwin/universal
+# 产物：build/ 下的 macOS 应用与安装包（universal 合并 arm64 和 amd64）
 ```
 
 非 Mac 机器也可 `GOOS=darwin go build` 交叉验证二进制（本项目已是纯 Go 无依赖）。
@@ -95,11 +95,11 @@ go run github.com/egoist/mygo/cmd/mygo@latest build -platform darwin/universal
 bun run dev:web                 # vite dev server，浏览器打开即看 UI（mock 引擎）
 bun run typecheck               # tsc
 CGO_ENABLED=0 go test ./...     # 引擎 + 评测单测（音高/PSOLA/共振峰/EQ/WAV/指标）
-CGO_ENABLED=0 ./node_modules/.bin/mygo vet .
+go run github.com/egoist/mygo/cmd/mygo vet .
 bun test                        # 前端流式队列 / monitor 生命周期测试
 ```
 
-浏览器预览模式下桥接层自动降级为 mock（音频原样返回），方便只调样式。
+浏览器预览模式下实时监听降级为 mock（音频原样返回），文件变声需要桌面版。桌面版使用 Web Audio 解码音频输入并输出 48 kHz WAV。界面支持简体中文和英文，语言目录位于 `locales/`，MyGo 负责在桌面版保存语言选择。
 
 ## 预留但暂未实现
 

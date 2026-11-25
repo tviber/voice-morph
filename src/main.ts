@@ -1,8 +1,8 @@
 import { bridge, inApp } from "./bridge";
-import { initDubbing } from "./dubbing";
 import { ChunkSender, MonitorSupervisor, STALE } from "./monitor-queue";
 import type { MonitorResources } from "./monitor-queue";
-import { isCallError } from "mygo-runtime";
+import { Channel, isCallError, onLocaleChange } from "mygo-runtime";
+import { messages, messagesIn, type Messages } from "./locales";
 import type { Params, State } from "./mygo";
 const workletUrl = "worklet.js"; // served from public/ beside index.html
 
@@ -13,11 +13,58 @@ let state: State;
 let params: Params;
 let eqStage: "pre" | "post" = "pre";
 let sendTimer: number | undefined;
+let text: Messages = messages;
+let languageTag = "zh-Hans";
+let activePreset = "normal";
+let currentMicStatus: "off" | "on" | "mock" | "error" | "fileDone" | "fileError" = "off";
+let micDetail = "";
+let fileSummary: { seconds: string; input: string; output: string } | null = null;
+
+function showMicStatus(kind: typeof currentMicStatus, detail = "") {
+  currentMicStatus = kind;
+  micDetail = detail;
+  const el = $("#mic-status");
+  el.textContent = kind === "off" ? text.micOff()
+    : kind === "on" ? text.micOn()
+    : kind === "mock" ? text.micMock()
+    : kind === "error" ? text.micError(detail)
+    : kind === "fileDone" && fileSummary ? text.fileDone(fileSummary.seconds, fileSummary.input, fileSummary.output)
+    : text.fileError(detail);
+}
+
+function translate(tag: string) {
+  languageTag = tag;
+  text = messagesIn(tag);
+  document.documentElement.lang = tag;
+  document.body.classList.toggle("english", tag === "en");
+  document.title = `VoiceMorph · ${text.liveTitle()}`;
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n as keyof Messages;
+    const message = text[key];
+    if (typeof message === "function") el.textContent = (message as () => string)();
+  });
+  $("#bypass").title = text.bypassTip();
+  $("#monitor").textContent = monitor.pending ? text.monitorStarting()
+    : monitor.running ? text.monitorStop() : text.monitorStart();
+  reflectParams();
+  showMicStatus(currentMicStatus, micDetail);
+  showRtStats();
+  if (state) {
+    $("#latency").textContent = text.latency(String(Math.round(state.latencyMs)));
+    renderPresets();
+  }
+}
 
 const PRESET_GLYPH: Record<string, string> = {
   normal: "◦", low: "▾", giant: "⬣", demon: "♦",
   woman: "❀", high: "▴", child: "✳", chipmunk: "✦",
   "natural-woman": "❁", "natural-child": "✧",
+};
+const EN_HINTS: Record<string, string> = {
+  normal: "Unprocessed", low: "Lower pitch", giant: "Low and wide", demon: "Deep formants",
+  woman: "Higher and lighter", high: "Pitch up", child: "High pitch and formants",
+  chipmunk: "Extreme high voice", "natural-woman": "Soft voice",
+  "natural-child": "Bright voice",
 };
 
 function scheduleSend() {
@@ -29,10 +76,24 @@ function scheduleSend() {
 async function init() {
   state = await bridge.getState();
   params = state.params;
+  const language = $<HTMLSelectElement>("#language");
+  const tag = await bridge.language();
+  language.value = tag;
+  translate(tag);
+  language.addEventListener("change", async () => {
+    const next = await bridge.setLanguage(language.value);
+    translate(next);
+  });
+  if (inApp) {
+    onLocaleChange((tag) => {
+      language.value = tag;
+      translate(tag);
+    });
+  }
 
   $("#platform").textContent = state.platform;
   $("#engine-rate").textContent = `${state.sampleRate / 1000}kHz`;
-  $("#latency").textContent = `引擎延迟 ~${Math.round(state.latencyMs)}ms`;
+  $("#latency").textContent = text.latency(String(Math.round(state.latencyMs)));
 
   bindFaders();
   renderPresets();
@@ -52,18 +113,19 @@ function renderPresets() {
     b.dataset.id = p.id;
     b.innerHTML = `
       <span class="glyph">${PRESET_GLYPH[p.id] ?? "●"}</span>
-      <span class="p-name">${p.nameZh} <small>${p.name}</small>${p.experimental ? `<em class="exp">实验</em>` : ""}</span>
-      <span class="p-sub">${p.hint}</span>
-      <span class="p-vals">${p.params.speech ? `F0 ${p.params.targetF0 || "自动"}` : `P${fmt(p.params.pitch)}`} T${fmt(p.params.timbre)}</span>`;
+      <span class="p-name">${languageTag === "en" ? p.name : `${p.nameZh} <small>${p.name}</small>`}${p.experimental ? `<em class="exp">${text.experimental()}</em>` : ""}</span>
+      <span class="p-sub">${languageTag === "en" ? EN_HINTS[p.id] ?? "" : p.hint}</span>
+      <span class="p-vals">${p.params.speech ? `F0 ${p.params.targetF0 || text.auto()}` : `P${fmt(p.params.pitch)}`} T${fmt(p.params.timbre)}</span>`;
     b.onclick = async () => {
       params = await bridge.applyPreset(p.id);
+      activePreset = p.id;
       reflectParams();
       markPreset(p.id);
       scheduleSend();
     };
     box.appendChild(b);
   }
-  markPreset("normal");
+  markPreset(activePreset);
 }
 
 function markPreset(id: string) {
@@ -132,8 +194,8 @@ function reflectSpeechMode() {
   $<HTMLInputElement>("#speech").checked = params.speech;
   $<HTMLFieldSetElement>("#speech-controls").disabled = !params.speech;
   $("#speech-note").textContent = params.speech
-    ? "已开启，适合说话。"
-    : "开启后可调语调与音高中心。";
+    ? text.speechOn()
+    : text.speechOff();
 }
 
 function reflectReadouts() {
@@ -141,10 +203,10 @@ function reflectReadouts() {
   $("#timbre-val").textContent = fmt(params.timbre);
   $("#strength-val").textContent = `${Math.round(params.strength * 100)}%`;
   $("#pitch-range-val").textContent = `${params.pitchRange.toFixed(2)}×`;
-  $("#target-f0-val").textContent = params.targetF0 === 0 ? "自动" : `${params.targetF0} Hz`;
+  $("#target-f0-val").textContent = params.targetF0 === 0 ? text.auto() : `${params.targetF0} Hz`;
   $("#formant-shape-val").textContent = fmt(params.formantShape);
-  $("#pitch-note").textContent = `${fmt(params.pitch * 12)} 半音`;
-  $<HTMLInputElement>("#target-f0").setAttribute("aria-valuetext", params.targetF0 === 0 ? "自动" : `${params.targetF0} Hz`);
+  $("#pitch-note").textContent = text.semitones(fmt(params.pitch * 12));
+  $<HTMLInputElement>("#target-f0").setAttribute("aria-valuetext", params.targetF0 === 0 ? text.auto() : `${params.targetF0} Hz`);
   for (const [id, v, lo, hi] of [
     ["#pitch", params.pitch, -1, 1],
     ["#timbre", params.timbre, -1, 1],
@@ -163,7 +225,7 @@ function reflectParams() {
   reflectReadouts();
   reflectSpeechMode();
   $("#bypass").setAttribute("aria-pressed", String(params.bypass));
-  $("#bypass").textContent = params.bypass ? "正在旁通" : "旁通原声";
+  $("#bypass").textContent = params.bypass ? text.bypassing() : text.bypass();
   syncEqInputs();
 }
 
@@ -247,8 +309,8 @@ function showRtStats(s?: RtStats) {
   // end-to-end queue delay ≈ blocks waiting on the send side + the
   // worklet's play-side ring
   const queueMs = sender.queueMs + lastStats.bufferedMs;
-  el.title = "排队≈发送队列+播放缓冲的延迟估计；丢块=积压丢弃或调用失败；超时=IPC 无响应；重同步=超时/被拒后换新流续发";
-  el.textContent = `缓冲 ${lastStats.bufferedMs}ms · 排队 ${queueMs}ms · 欠载 ${lastStats.underruns} · 丢块 ${sender.droppedBlocks} · 溢出 ${lastStats.overruns} · 超时 ${sender.ipcTimeouts} · 重同步 ${sender.resyncs}`;
+  el.title = text.rtTip();
+  el.textContent = text.rtStats(String(lastStats.bufferedMs), String(queueMs), String(lastStats.underruns), String(sender.droppedBlocks), String(lastStats.overruns), String(sender.ipcTimeouts), String(sender.resyncs));
 }
 
 // One start attempt's async chain: every device is LOCAL to `res`
@@ -335,13 +397,13 @@ function bindMonitor() {
       // running → stop; pending → cancel the in-flight start (its
       // attempt resolves "stale" and releases its own devices)
       stopMonitor();
-      $("#monitor").textContent = "开始监听";
+      $("#monitor").textContent = text.monitorStart();
       $("#monitor").classList.remove("live");
-      $("#mic-status").textContent = "麦克风未开启";
+      showMicStatus("off");
       return;
     }
     try {
-      $("#monitor").textContent = "启动中…"; // click again to cancel
+      $("#monitor").textContent = text.monitorStarting(); // click again to cancel
       const r = await monitor.start({
         resetStream: () => bridge.resetStream(),
         setup: setupMonitor,
@@ -349,18 +411,16 @@ function bindMonitor() {
       // busy = a start is already in flight (double click);
       // stale = stop() raced in mid-setup and the attempt released itself
       if (r !== "started") {
-        $("#monitor").textContent = "开始监听";
+        $("#monitor").textContent = text.monitorStart();
         return;
       }
-      $("#monitor").textContent = "停止监听";
+      $("#monitor").textContent = text.monitorStop();
       $("#monitor").classList.add("live");
-      $("#mic-status").textContent = inApp
-        ? "监听中 — 说话试试"
-        : "浏览器预览：音频原样返回（无 Go 引擎）";
+      showMicStatus(inApp ? "on" : "mock");
       showRtStats();
     } catch (err) {
-      $("#monitor").textContent = "开始监听";
-      $("#mic-status").textContent = `麦克风不可用：${(err as Error).message}`;
+      $("#monitor").textContent = text.monitorStart();
+      showMicStatus("error", (err as Error).message);
     }
   });
 }
@@ -422,6 +482,7 @@ async function morphFile(file: File) {
   const result = $("#file-result");
   dz_busy(true);
   try {
+    if (!inApp) throw new Error(text.fileDesktopOnly());
     const raw = await file.arrayBuffer();
     // decode any audio format with Web Audio, resample to 48 kHz mono WAV
     const ac = new AudioContext();
@@ -435,19 +496,22 @@ async function morphFile(file: File) {
     const rendered = await off.startRendering();
     const mono = rendered.getChannelData(0);
     const wav = encodeWav16(mono, 48000);
-    const out = await bridge.processFile(b64Encode(wav));
-    if (!out.wav) throw new Error("引擎未返回音频（浏览器预览模式）");
-    const wavBytes = b64ToBytes(out.wav);
-    const blob = new Blob([wavBytes.buffer as ArrayBuffer], { type: "audio/wav" });
+    const parts: Uint8Array[] = [];
+    const chunks = new Channel<string>((chunk) => parts.push(b64ToBytes(chunk)));
+    const done = bridge.processFile(b64Encode(wav), chunks);
+    const out = await done;
+    if (parts.length === 0) throw new Error(text.fileEmpty());
+    const blob = new Blob(parts.map((part) => new Uint8Array(part).buffer as ArrayBuffer), { type: "audio/wav" });
     resultUrl?.startsWith("blob:") && URL.revokeObjectURL(resultUrl);
     const url = URL.createObjectURL(blob);
     resultUrl = url;
     $<HTMLAudioElement>("#result-player").src = url;
     $<HTMLAnchorElement>("#download").href = url;
     result.hidden = false;
-    $("#mic-status").textContent = `已处理 ${out.seconds.toFixed(1)}s（${out.inHz}→${out.outHz} Hz）`;
+    fileSummary = { seconds: out.seconds.toFixed(1), input: String(out.inHz), output: String(out.outHz) };
+    showMicStatus("fileDone");
   } catch (err) {
-    $("#mic-status").textContent = `处理失败：${(err as Error).message}`;
+    showMicStatus("fileError", (err as Error).message);
   } finally {
     dz_busy(false);
   }
@@ -507,27 +571,4 @@ function encodeWav16(samples: Float32Array, sr: number): Uint8Array {
   return new Uint8Array(buf);
 }
 
-function bindWorkspaceTabs() {
-  const live = $("#tab-live");
-  const dub = $("#tab-dub");
-  const setTab = (which: "live" | "dub") => {
-    live.classList.toggle("on", which === "live");
-    dub.classList.toggle("on", which === "dub");
-    $("#live-pane").hidden = which !== "live";
-    $("#live-actions").hidden = which !== "live";
-    $("#dub-pane").hidden = which !== "dub";
-    // 配音页侧栏换成角色声线面板，隐藏实时预设 rail
-    const rail = document.querySelector<HTMLElement>(".rail");
-    if (rail) rail.hidden = which !== "live";
-    $("#ws-title").textContent = which === "live" ? "实时变声" : "离线配音";
-    $("#ws-sub").textContent = which === "live"
-      ? "麦克风 → Go 引擎 → 监听"
-      : "录音 → ASR 转写 → 台本校对 → 批量变声";
-  };
-  live.addEventListener("click", () => setTab("live"));
-  dub.addEventListener("click", () => setTab("dub"));
-}
-
 void init();
-bindWorkspaceTabs();
-initDubbing();

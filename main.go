@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -14,7 +15,20 @@ import (
 	"github.com/egoist/mygo"
 
 	"voice-morph/engine"
+	_ "voice-morph/locales"
 )
+
+// Language is the current app language, matched against its catalogs.
+func (m *Morpher) Language() string { return mygo.App.Locale() }
+
+// SetLanguage keeps the user's choice across launches.
+func (m *Morpher) SetLanguage(tag string) string {
+	if tag != "en" && tag != "zh-Hans" {
+		return mygo.App.Locale()
+	}
+	mygo.App.SetLocale(tag)
+	return mygo.App.Locale()
+}
 
 // State is everything the UI needs on load.
 type State struct {
@@ -28,7 +42,6 @@ type State struct {
 
 // FileResult is the outcome of morphing a whole clip.
 type FileResult struct {
-	Wav     string  `json:"wav"`     // base64 16-bit PCM WAV, 48 kHz mono
 	Seconds float64 `json:"seconds"` // input duration
 	InHz    int     `json:"inHz"`    // input sample rate
 	OutHz   int     `json:"outHz"`   // output sample rate
@@ -162,7 +175,7 @@ func (m *Morpher) ProcessChunk(streamID int64, seq int64, pcm string) (string, e
 }
 
 // ProcessFile morphs a whole WAV clip offline and returns a 48 kHz WAV.
-func (m *Morpher) ProcessFile(wavB64 string) (FileResult, error) {
+func (m *Morpher) ProcessFile(ctx context.Context, wavB64 string, chunks *mygo.Channel[[]byte]) (FileResult, error) {
 	raw, err := base64.StdEncoding.DecodeString(wavB64)
 	if err != nil {
 		return FileResult{}, err
@@ -183,8 +196,18 @@ func (m *Morpher) ProcessFile(wavB64 string) (FileResult, error) {
 	eng := engine.New()
 	eng.SetParams(m.eng.Params())
 	out := eng.Render(pcm)
+	encoded := engine.EncodeWAV(out, engine.SampleRate)
+	const chunkSize = 48 * 1024
+	for start := 0; start < len(encoded); start += chunkSize {
+		end := min(start+chunkSize, len(encoded))
+		if err := chunks.Send(encoded[start:end]); err != nil {
+			return FileResult{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return FileResult{}, err
+	}
 	return FileResult{
-		Wav:     base64.StdEncoding.EncodeToString(engine.EncodeWAV(out, engine.SampleRate)),
 		Seconds: secs,
 		InHz:    sr, OutHz: engine.SampleRate,
 		Elapsed: float64(time.Since(t0)) / 1e6,
@@ -208,7 +231,6 @@ func resampleTo(in []float32, from, to int) []float32 {
 
 func main() {
 	mygo.Bind(&Morpher{eng: engine.New(), lastSeq: -1})
-	mygo.Bind(&Dubber{})
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

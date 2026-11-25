@@ -12,6 +12,7 @@ export default defineConfig({
   buildCommand: "bun run build:web",
   frontendDist: "dist",
   bindings: "src/mygo.ts",
+  i18n: { dir: "locales", source: "zh-Hans" },
   out: "build",
   macos: {
     // v1 targets macOS on Intel and Apple Silicon (darwin/universal);

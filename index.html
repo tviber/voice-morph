@@ -17,11 +17,11 @@
           </svg>
           <div class="brand-text">
             <h1>VoiceMorph</h1>
-            <p>Go 变声器 · 变声工坊</p>
+            <p data-i18n="brandSub">Go 变声器 · 变声工坊</p>
           </div>
         </div>
 
-        <p class="rail-label">声音预设 <span>Voices</span></p>
+        <p class="rail-label"><span data-i18n="presetsTitle">声音预设</span> <span>Voices</span></p>
         <div id="presets" class="presets"></div>
 
         <div class="rail-foot">
@@ -35,16 +35,16 @@
       <main class="stage">
         <header class="topbar">
           <div class="topbar-title">
-            <h2 id="ws-title">实时变声</h2>
-            <p class="sub" id="ws-sub">麦克风 → Go 引擎 → 监听</p>
-          </div>
-          <div class="ws-tabs">
-            <button id="tab-live" class="on">实时变声</button>
-            <button id="tab-dub">离线配音</button>
+            <h2 id="ws-title" data-i18n="liveTitle">实时变声</h2>
+            <p class="sub" id="ws-sub" data-i18n="liveSub">麦克风 → Go 引擎 → 监听</p>
           </div>
           <div class="topbar-actions" id="live-actions">
-            <button id="bypass" class="btn ghost" aria-pressed="false" title="对比原声">旁通原声</button>
+            <button id="bypass" class="btn ghost" aria-pressed="false" data-i18n-title="bypassTip">旁通原声</button>
             <button id="monitor" class="btn primary big">开始监听</button>
+            <select id="language" aria-label="Language" title="Language">
+              <option value="zh-Hans">简体中文</option>
+              <option value="en">English</option>
+            </select>
           </div>
         </header>
 
@@ -52,94 +52,94 @@
           <!-- transport / meters -->
           <div class="card monitor-card">
             <div class="card-head">
-              <h3>信号</h3>
+              <h3 data-i18n="signal">信号</h3>
               <span id="latency" class="meta"></span>
             </div>
             <div class="meters">
               <div class="meter">
-                <span class="meter-label">输入</span>
+                <span class="meter-label" data-i18n="input">输入</span>
                 <div class="meter-track"><div id="meter-in" class="meter-fill"></div></div>
               </div>
               <div class="meter">
-                <span class="meter-label">输出</span>
+                <span class="meter-label" data-i18n="output">输出</span>
                 <div class="meter-track"><div id="meter-out" class="meter-fill out"></div></div>
               </div>
             </div>
             <canvas id="scope" height="86"></canvas>
-            <p id="mic-status" class="meta dim">麦克风未开启</p>
+            <p id="mic-status" class="meta dim"></p>
             <p id="rt-stats" class="meta dim" hidden></p>
           </div>
 
           <!-- tweak panel -->
           <div class="card tweak-card">
             <div class="card-head">
-              <h3>调参面板</h3>
-              <button id="reset" class="btn ghost sm">重置</button>
+              <h3 data-i18n="tweak">调参面板</h3>
+              <button id="reset" class="btn ghost sm" data-i18n="reset">重置</button>
             </div>
             <div class="speech-mode">
               <div>
-                <label for="speech">语音模式</label>
-                <p id="speech-note">适合说话，可调语调与音高中心。</p>
+                <label for="speech" data-i18n="speechMode">语音模式</label>
+                <p id="speech-note"></p>
               </div>
               <input type="checkbox" id="speech" role="switch" aria-controls="speech-controls" aria-describedby="speech-note" />
             </div>
             <div class="faders">
               <div class="fader">
                 <div class="fader-top">
-                  <label for="pitch">音高 <em>Pitch</em></label>
+                  <label for="pitch"><span data-i18n="pitch">音高</span> <em>Pitch</em></label>
                   <output id="pitch-val">0.00</output>
                 </div>
                 <input type="range" id="pitch" min="-1" max="1" step="0.01" value="0" />
-                <div class="fader-scale"><span>低沉</span><span>原声</span><span>尖细</span></div>
+                <div class="fader-scale"><span data-i18n="low">低沉</span><span data-i18n="normal">原声</span><span data-i18n="highThin">尖细</span></div>
                 <p id="pitch-note" class="fader-note">±0.0 半音</p>
               </div>
               <div class="fader">
                 <div class="fader-top">
-                  <label for="timbre">音色 <em>Timbre</em></label>
+                  <label for="timbre"><span data-i18n="timbre">音色</span> <em>Timbre</em></label>
                   <output id="timbre-val">0.00</output>
                 </div>
                 <input type="range" id="timbre" min="-1" max="1" step="0.01" value="0" />
-                <div class="fader-scale"><span>巨人</span><span>原声</span><span>小孩</span></div>
-                <p class="fader-note">共振峰偏移</p>
+                <div class="fader-scale"><span data-i18n="giant">巨人</span><span data-i18n="normal">原声</span><span data-i18n="child">小孩</span></div>
+                <p class="fader-note" data-i18n="formantShift">共振峰偏移</p>
               </div>
               <div class="fader">
                 <div class="fader-top">
-                  <label for="strength">强度 <em>Strength</em></label>
+                  <label for="strength"><span data-i18n="strength">强度</span> <em>Strength</em></label>
                   <output id="strength-val">100%</output>
                 </div>
                 <input type="range" id="strength" min="0" max="100" step="1" value="100" />
                 <div class="fader-scale"><span>0%</span><span></span><span>100%</span></div>
-                <p class="fader-note">音色偏移强度（非干湿比）</p>
+                <p class="fader-note" data-i18n="strengthNote">音色偏移强度（非干湿比）</p>
               </div>
             </div>
             <fieldset id="speech-controls" class="faders speech-controls" disabled aria-describedby="speech-note">
-              <legend class="sr-only">语音模式调节</legend>
+              <legend class="sr-only" data-i18n="speechControls">语音模式调节</legend>
               <div class="fader">
                 <div class="fader-top">
-                  <label for="pitch-range">语调幅度</label>
+                  <label for="pitch-range" data-i18n="pitchRange">语调幅度</label>
                   <output id="pitch-range-val">1.00×</output>
                 </div>
                 <input type="range" id="pitch-range" min="0" max="1.5" step="0.01" value="1" aria-describedby="pitch-range-note" />
-                <div class="fader-scale"><span>平稳</span><span>自然</span><span>丰富</span></div>
-                <p id="pitch-range-note" class="fader-note">控制说话时的音高起伏</p>
+                <div class="fader-scale"><span data-i18n="steady">平稳</span><span data-i18n="natural">自然</span><span data-i18n="expressive">丰富</span></div>
+                <p id="pitch-range-note" class="fader-note" data-i18n="pitchRangeNote">控制说话时的音高起伏</p>
               </div>
               <div class="fader">
                 <div class="fader-top">
-                  <label for="target-f0">目标音高中心 <em>Hz</em></label>
+                  <label for="target-f0"><span data-i18n="targetF0">目标音高中心</span> <em>Hz</em></label>
                   <output id="target-f0-val">自动</output>
                 </div>
                 <input type="range" id="target-f0" min="0" max="500" step="10" value="0" aria-describedby="target-f0-note" />
-                <div class="fader-scale"><span>自动</span><span>70–500 Hz</span></div>
-                <p id="target-f0-note" class="fader-note">自动跟随原声音高中心；设置后仍叠加音高调节</p>
+                <div class="fader-scale"><span data-i18n="auto">自动</span><span>70–500 Hz</span></div>
+                <p id="target-f0-note" class="fader-note" data-i18n="targetF0Note">自动跟随原声音高中心；设置后仍叠加音高调节</p>
               </div>
               <div class="fader">
                 <div class="fader-top">
-                  <label for="formant-shape">共振峰形状</label>
+                  <label for="formant-shape" data-i18n="formantShape">共振峰形状</label>
                   <output id="formant-shape-val">+0.00</output>
                 </div>
                 <input type="range" id="formant-shape" min="-1" max="1" step="0.01" value="0" aria-describedby="formant-shape-note" />
-                <div class="fader-scale"><span>厚实</span><span>自然</span><span>明亮</span></div>
-                <p id="formant-shape-note" class="fader-note">调整音色的厚实与明亮感</p>
+                <div class="fader-scale"><span data-i18n="thick">厚实</span><span data-i18n="natural">自然</span><span data-i18n="bright">明亮</span></div>
+                <p id="formant-shape-note" class="fader-note" data-i18n="formantShapeNote">调整音色的厚实与明亮感</p>
               </div>
             </fieldset>
           </div>
@@ -147,75 +147,32 @@
           <!-- EQ -->
           <div class="card eq-card">
             <div class="card-head">
-              <h3>10 段均衡</h3>
+              <h3 data-i18n="eqTitle">10 段均衡</h3>
               <div class="seg" id="eq-stage">
-                <button data-stage="pre" class="on">前级</button><button data-stage="post">后级</button>
+                <button data-stage="pre" class="on" data-i18n="pre">前级</button><button data-stage="post" data-i18n="post">后级</button>
               </div>
             </div>
             <div id="eq-bands" class="eq-bands"></div>
-            <button id="eq-flat" class="btn ghost sm">归零</button>
+            <button id="eq-flat" class="btn ghost sm" data-i18n="flatten">归零</button>
           </div>
 
           <!-- file morph -->
           <div class="card file-card">
             <div class="card-head">
-              <h3>文件变声</h3>
-              <span class="meta">WAV 输入 → 48 kHz WAV 输出</span>
+              <h3 data-i18n="fileTitle">文件变声</h3>
+              <span class="meta" data-i18n="fileMeta">WAV 输入 → 48 kHz WAV 输出</span>
             </div>
             <div id="dropzone" class="dropzone" tabindex="0">
-              <p>拖入音频文件，或 <u>点击选择</u></p>
+              <p data-i18n="dropHint">拖入音频文件，或点击选择</p>
               <input id="file-input" type="file" accept="audio/*" hidden />
             </div>
             <div id="file-result" class="file-result" hidden>
               <audio id="result-player" controls></audio>
-              <a id="download" class="btn ghost sm" download="voicemorph.wav">下载 WAV</a>
+              <a id="download" class="btn ghost sm" download="voicemorph.wav" data-i18n="download">下载 WAV</a>
             </div>
           </div>
         </section>
 
-        <!-- ══ 离线配音 workspace ══ -->
-        <section id="dub-pane" class="dub" hidden>
-          <div class="card">
-            <div class="card-head"><h3>输入</h3><span id="dub-model" class="meta"></span></div>
-            <div class="dub-grid">
-              <div class="dub-row"><span>录音 WAV</span><code id="dub-audio" class="dim">未选择</code><button id="dub-pick-audio" class="btn sm">选择</button></div>
-              <div class="dub-row"><span>台本 JSON</span><code id="dub-script" class="dim">未选择</code><button id="dub-pick-script" class="btn sm">选择</button></div>
-              <div class="dub-row"><span>voices.json</span><code id="dub-voices" class="dim">未选择</code><button id="dub-pick-voices" class="btn sm">选择</button></div>
-              <div class="dub-row"><span>输出目录</span><code id="dub-out" class="dim">未选择</code><button id="dub-pick-out" class="btn sm">选择</button></div>
-            </div>
-            <div class="dub-actions">
-              <button id="dub-run" class="btn primary">转写 + 校对</button>
-              <button id="dub-load-timeline" class="btn ghost">打开已有 timeline</button>
-              <button id="dub-pick-model" class="btn ghost">选择模型目录</button>
-              <button id="dub-open-out" class="btn ghost">打开输出目录</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <h3>校对审核</h3>
-              <div>
-                <span id="dub-review-count" class="meta"></span>
-                <span id="dub-unmatched" class="meta warn"></span>
-              </div>
-            </div>
-            <div class="seg-wrap">
-              <table class="seg-table">
-                <thead><tr>
-                  <th>#</th><th></th><th>时间(s)</th><th>台本</th><th>实际朗读</th><th>角色</th><th>状态</th><th>审核原因</th><th>选用</th>
-                </tr></thead>
-                <tbody id="dub-seg-body"></tbody>
-              </table>
-            </div>
-            <div class="dub-actions">
-              <button id="dub-save-review" class="btn">保存审核结果</button>
-              <button id="dub-render" class="btn primary">批量渲染</button>
-            </div>
-          </div>
-
-          <div class="card" id="dub-manifest"></div>
-          <div id="dub-toast" class="toast"></div>
-        </section>
       </main>
     </div>
     <script type="module" src="./src/main.ts"></script>

@@ -778,7 +778,7 @@ func TestBypassPositionAligned(t *testing.T) {
 	assertOnsets1to1(t, in, out, 960, 0.5)
 }
 
-// Render must be lip-synced for dubbing: exactly len(in) samples, and
+// Render must preserve the input duration: exactly len(in) samples, and
 // an onset must land within ~20 ms of its input position.
 func TestRenderLipSync(t *testing.T) {
 	ns := SampleRate * 3 / 10

@@ -8,20 +8,24 @@ import type { FileResult, Params, Preset, State } from "./mygo";
 
 export interface Bridge {
   getState(): Promise<State>;
+  language(): Promise<string>;
+  setLanguage(tag: string): Promise<string>;
   setParams(p: Params): Promise<void>;
   applyPreset(id: string): Promise<Params>;
   processChunk(streamID: number, seq: number, pcmB64: string): Promise<string>;
-  processFile(wavB64: string): Promise<FileResult>;
+  processFile(wavB64: string, chunks: import("mygo-runtime").Channel<string>): Promise<FileResult>;
   /** issues a new monitor epoch; resolves to that epoch's stream-ID base */
   resetStream(): Promise<number>;
 }
 
 const real: Bridge = {
   getState: () => Morpher.getState(),
+  language: () => Morpher.language(),
+  setLanguage: (tag) => Morpher.setLanguage(tag),
   setParams: (p) => Morpher.setParams(p),
   applyPreset: (id) => Morpher.applyPreset(id),
   processChunk: (streamID, seq, pcm) => Morpher.processChunk(streamID, seq, pcm),
-  processFile: (wav) => Morpher.processFile(wav),
+  processFile: (wav, chunks) => Morpher.processFile(wav, chunks),
   resetStream: () => Morpher.resetStream(),
 };
 
@@ -62,11 +66,16 @@ const mock: Bridge = {
     latencyMs: 107,
     platform: "browser/mock",
   }),
+  language: async () => localStorage.getItem("voicemorph-language") || "zh-Hans",
+  setLanguage: async (tag) => {
+    localStorage.setItem("voicemorph-language", tag);
+    return tag;
+  },
   setParams: async () => {},
   applyPreset: async (id) => mockPresets.find((p) => p.id === id)!.params,
   // dry pass-through in the browser preview
   processChunk: async (_streamID, _seq, pcm) => pcm,
-  processFile: async () => ({ wav: "", seconds: 0, inHz: 48000, outHz: 48000, elapsed: 0 }),
+  processFile: async () => ({ seconds: 0, inHz: 48000, outHz: 48000, elapsed: 0 }),
   resetStream: async () => ++mockEpoch,
 };
 
