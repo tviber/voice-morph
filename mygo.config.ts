@@ -3,7 +3,7 @@ import { defineConfig } from "mygo-cli";
 export default defineConfig({
   name: "VoiceMorph",
   identifier: "dev.tinyviber.voicemorph",
-  version: "0.1.0",
+  version: "0.1.0-beta.1",
   copyright: "© 2026 tinyviber",
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
   // buildCommand and embeds frontendDist into the app.
@@ -12,12 +12,20 @@ export default defineConfig({
   buildCommand: "bun run build:web",
   frontendDist: "dist",
   bindings: "src/mygo.ts",
+  i18n: { dir: "locales", source: "zh-Hans" },
   out: "build",
+  resources: ["LICENSE"],
   macos: {
-    // v1 targets macOS on Intel and Apple Silicon (darwin/universal);
-    // windows/linux builds are left for later.
+    // One universal disk image for Intel and Apple Silicon.
     minimumSystemVersion: "13.0",
+    entitlements: "packaging/microphone.plist",
+    signingIdentity: process.env.VOICEMORPH_SIGN_IDENTITY,
+    notarize: process.env.VOICEMORPH_NOTARY_PROFILE
+      ? { keychainProfile: process.env.VOICEMORPH_NOTARY_PROFILE }
+      : undefined,
     infoPlist: {
+      CFBundleShortVersionString: "0.1.0",
+      CFBundleVersion: "0.1.0b1",
       NSMicrophoneUsageDescription:
         "VoiceMorph 需要访问麦克风来做实时变声监听。",
       CFBundleDisplayName: "VoiceMorph 变声工坊",

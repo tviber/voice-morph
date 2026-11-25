@@ -1,18 +1,34 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 
 	"voice-morph/engine"
+	_ "voice-morph/locales"
 )
+
+// Language is the current app language, matched against its catalogs.
+func (m *Morpher) Language() string { return mygo.App.Locale() }
+
+// SetLanguage keeps the user's choice across launches.
+func (m *Morpher) SetLanguage(tag string) string {
+	if tag != "en" && tag != "zh-Hans" {
+		return mygo.App.Locale()
+	}
+	mygo.App.SetLocale(tag)
+	return mygo.App.Locale()
+}
 
 // State is everything the UI needs on load.
 type State struct {
@@ -26,16 +42,41 @@ type State struct {
 
 // FileResult is the outcome of morphing a whole clip.
 type FileResult struct {
-	Wav     string  `json:"wav"`     // base64 16-bit PCM WAV, 48 kHz mono
 	Seconds float64 `json:"seconds"` // input duration
 	InHz    int     `json:"inHz"`    // input sample rate
 	OutHz   int     `json:"outHz"`   // output sample rate
 	Elapsed float64 `json:"elapsed"` // DSP wall time, ms
 }
 
+// streamSpan spaces out the stream IDs of successive monitor epochs:
+// epoch N's chunks carry streamID = N*streamSpan + resync index, so a
+// resynced stream is always newer than every stream of its own epoch and
+// always older than the next epoch's. The JS sender derives its IDs the
+// same way from the base ResetStream returns.
+const streamSpan = int64(1 << 20)
+
+// staleChunkPrefix tags protocol rejections so the JS sender can tell a
+// dead-stream refusal (→ resync onto a fresh stream ID) from a generic
+// IPC failure (→ drop the block, keep draining the same stream).
+const staleChunkPrefix = "voicemorph: stale chunk"
+
 // Morpher is the bound service: the page calls these methods.
 type Morpher struct {
-	eng *engine.Engine
+	eng     *engine.Engine
+	virtual virtualOutput
+
+	// Chunk protocol state. mygo runs every bound call on its own
+	// goroutine and the JS sender abandons an IPC wait on timeout while
+	// the Go call keeps running, so ProcessChunk calls can reach eng in
+	// any order. mu makes the {curStream, lastSeq} check and the engine
+	// work one atomic step, turning reordering into deterministic
+	// rejection instead of arbitrary stream-state mutation.
+	mu         sync.Mutex
+	issued     int64 // monitor epochs handed out by ResetStream
+	curStream  int64 // the only stream allowed to mutate DSP state
+	lastSeq    int64 // highest seq already processed on curStream (-1: none)
+	seqGaps    int64 // seq holes processed over (client-side unsent drops)
+	staleDrops int64 // calls rejected by the protocol before any mutation
 }
 
 // GetState returns params, presets and constants for the UI.
@@ -68,12 +109,53 @@ func (m *Morpher) ApplyPreset(id string) (engine.Params, error) {
 	return engine.Params{}, errors.New("unknown preset: " + id)
 }
 
-// ResetStream clears streaming state (called when monitoring restarts).
-func (m *Morpher) ResetStream() { m.eng.Reset() }
+// ResetStream begins a monitor epoch: the engine's streaming state is
+// rebuilt and the returned base defines the stream IDs the monitor's
+// chunks carry (base + the sender's resync index; epochs are spaced by
+// streamSpan). From this point on every chunk on an earlier stream is
+// stale and rejected — calls still in flight from a previous monitor can
+// no longer mutate state, before the new stream's first block arrives.
+func (m *Morpher) ResetStream() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeVirtualLocked()
+	m.issued++
+	m.curStream = m.issued * streamSpan
+	m.lastSeq = -1
+	m.eng.Reset()
+	return m.curStream
+}
 
 // ProcessChunk morphs one realtime block: base64 little-endian float32
 // mono at 48 kHz in, same format out.
-func (m *Morpher) ProcessChunk(pcm string) (string, error) {
+//
+// Protocol: every chunk carries its (streamID, seq) and the protocol
+// decides each call's fate under mu, atomically with the DSP work, so a
+// reordered or late call can never mutate stream state out of turn:
+//
+//	streamID <  curStream              → stale: rejected, zero mutation
+//	streamID == curStream, seq ≤ lastSeq → stale: rejected, zero mutation
+//	streamID >  curStream              → new stream adopted: DSP state is
+//	                                     rebuilt (the previous stream died
+//	                                     ≥ a timeout behind; replaying its
+//	                                     alignment would echo stale audio)
+//	seq > lastSeq                      → processed, lastSeq = seq; a jump
+//	                                     leaves a content hole equivalent
+//	                                     to the client's drop-oldest policy
+//	                                     and is counted in seqGaps
+func (m *Morpher) ProcessChunk(streamID int64, seq int64, pcm string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if streamID < m.curStream || (streamID == m.curStream && seq <= m.lastSeq) {
+		m.staleDrops++
+		return "", fmt.Errorf("%s (stream %d seq %d; current stream %d lastSeq %d)",
+			staleChunkPrefix, streamID, seq, m.curStream, m.lastSeq)
+	}
+	if streamID > m.curStream {
+		m.curStream = streamID
+		m.lastSeq = -1
+		m.eng.Reset()
+	}
 	raw, err := base64.StdEncoding.DecodeString(pcm)
 	if err != nil || len(raw)%4 != 0 {
 		return "", errors.New("bad pcm payload")
@@ -82,7 +164,18 @@ func (m *Morpher) ProcessChunk(pcm string) (string, error) {
 	for i := range in {
 		in[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
 	}
+	if gap := seq - m.lastSeq - 1; gap > 0 {
+		m.seqGaps += gap
+	}
 	out := m.eng.Process(in)
+	m.lastSeq = seq
+	if m.virtual != nil {
+		if err := m.virtual.write(out); err != nil {
+			// Keep the failed route until Stop/Reset so subsequent calls cannot
+			// silently fall back to local playback.
+			return "", fmt.Errorf("voicemorph: virtual output: %w", err)
+		}
+	}
 	buf := make([]byte, len(out)*4)
 	for i, v := range out {
 		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
@@ -91,7 +184,7 @@ func (m *Morpher) ProcessChunk(pcm string) (string, error) {
 }
 
 // ProcessFile morphs a whole WAV clip offline and returns a 48 kHz WAV.
-func (m *Morpher) ProcessFile(wavB64 string) (FileResult, error) {
+func (m *Morpher) ProcessFile(ctx context.Context, wavB64 string, chunks *mygo.Channel[[]byte]) (FileResult, error) {
 	raw, err := base64.StdEncoding.DecodeString(wavB64)
 	if err != nil {
 		return FileResult{}, err
@@ -105,9 +198,25 @@ func (m *Morpher) ProcessFile(wavB64 string) (FileResult, error) {
 	}
 	secs := float64(len(pcm)) / engine.SampleRate
 	t0 := time.Now()
-	out := m.eng.Render(pcm)
+	// Render on a dedicated engine: Render holds the mutex for the whole
+	// clip and rebuilds streaming state at the end, so running it on
+	// m.eng would stall live ProcessChunk calls and wipe the monitor's
+	// buffered stream state.
+	eng := engine.New()
+	eng.SetParams(m.eng.Params())
+	out := eng.Render(pcm)
+	encoded := engine.EncodeWAV(out, engine.SampleRate)
+	const chunkSize = 48 * 1024
+	for start := 0; start < len(encoded); start += chunkSize {
+		end := min(start+chunkSize, len(encoded))
+		if err := chunks.Send(encoded[start:end]); err != nil {
+			return FileResult{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return FileResult{}, err
+	}
 	return FileResult{
-		Wav:     base64.StdEncoding.EncodeToString(engine.EncodeWAV(out, engine.SampleRate)),
 		Seconds: secs,
 		InHz:    sr, OutHz: engine.SampleRate,
 		Elapsed: float64(time.Since(t0)) / 1e6,
@@ -130,7 +239,7 @@ func resampleTo(in []float32, from, to int) []float32 {
 }
 
 func main() {
-	mygo.Bind(&Morpher{eng: engine.New()})
+	mygo.Bind(&Morpher{eng: engine.New(), lastSeq: -1})
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

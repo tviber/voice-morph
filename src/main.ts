@@ -1,5 +1,10 @@
 import { bridge, inApp } from "./bridge";
+import { ChunkSender, MonitorSupervisor, STALE } from "./monitor-queue";
+import type { MonitorResources } from "./monitor-queue";
+import { Channel, isCallError, onLocaleChange } from "mygo-runtime";
+import { messages, messagesIn, type Messages } from "./locales";
 import type { Params, State } from "./mygo";
+import { Morpher } from "./mygo";
 const workletUrl = "worklet.js"; // served from public/ beside index.html
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -9,10 +14,62 @@ let state: State;
 let params: Params;
 let eqStage: "pre" | "post" = "pre";
 let sendTimer: number | undefined;
+let text: Messages = messages;
+let languageTag = "zh-Hans";
+let activePreset = "normal";
+let currentMicStatus: "off" | "on" | "virtual" | "routeFailed" | "mock" | "error" | "fileDone" | "fileError" = "off";
+let micDetail = "";
+let fileSummary: { seconds: string; input: string; output: string } | null = null;
+
+function showMicStatus(kind: typeof currentMicStatus, detail = "") {
+  currentMicStatus = kind;
+  micDetail = detail;
+  const el = $("#mic-status");
+  el.textContent = kind === "off" ? text.micOff()
+    : kind === "virtual" ? text.routeActive()
+    : kind === "routeFailed" ? text.routeFailed()
+    : kind === "on" ? text.micOn()
+    : kind === "mock" ? text.micMock()
+    : kind === "error" ? text.micError(detail)
+    : kind === "fileDone" && fileSummary ? text.fileDone(fileSummary.seconds, fileSummary.input, fileSummary.output)
+    : text.fileError(detail);
+}
+
+function translate(tag: string) {
+  languageTag = tag;
+  text = messagesIn(tag);
+  document.documentElement.lang = tag;
+  document.body.classList.toggle("english", tag === "en");
+  document.title = `VoiceMorph · ${text.liveTitle()}`;
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    const key = el.dataset.i18n as keyof Messages;
+    const message = text[key];
+    if (typeof message === "function") el.textContent = (message as () => string)();
+  });
+  $("#bypass").title = text.bypassTip();
+  $("#monitor").textContent = monitor.pending ? text.monitorStarting()
+    : monitor.running ? text.monitorStop() : text.monitorStart();
+  reflectParams();
+  showMicStatus(currentMicStatus, micDetail);
+  showRtStats();
+  if (state) {
+    $("#latency").textContent = text.latency(String(Math.round(state.latencyMs)));
+    renderPresets();
+  }
+}
 
 const PRESET_GLYPH: Record<string, string> = {
   normal: "◦", low: "▾", giant: "⬣", demon: "♦",
   woman: "❀", high: "▴", child: "✳", chipmunk: "✦",
+  "natural-woman": "❁", "natural-child": "✧",
+};
+const EN_HINTS: Record<string, string> = {
+  "warm-lecture": "Soft, warm delivery for longer lessons", "clear-demo": "Brighter consonants for walkthroughs",
+  "studio-narration": "Fuller, steadier narration", "casual-talk": "Light and expressive for Q&A",
+  normal: "Unprocessed", low: "Lower pitch", giant: "Low and wide", demon: "Deep formants",
+  woman: "Higher and lighter", high: "Pitch up", child: "High pitch and formants",
+  chipmunk: "Extreme high voice", "natural-woman": "Soft voice",
+  "natural-child": "Bright voice",
 };
 
 function scheduleSend() {
@@ -24,14 +81,28 @@ function scheduleSend() {
 async function init() {
   state = await bridge.getState();
   params = state.params;
+  const language = $<HTMLSelectElement>("#language");
+  const tag = await bridge.language();
+  language.value = tag;
+  translate(tag);
+  language.addEventListener("change", async () => {
+    const next = await bridge.setLanguage(language.value);
+    translate(next);
+  });
+  if (inApp) {
+    onLocaleChange((tag) => {
+      language.value = tag;
+      translate(tag);
+    });
+  }
 
   $("#platform").textContent = state.platform;
   $("#engine-rate").textContent = `${state.sampleRate / 1000}kHz`;
-  $("#latency").textContent = `引擎延迟 ~${Math.round(state.latencyMs)}ms`;
+  $("#latency").textContent = text.latency(String(Math.round(state.latencyMs)));
 
+  bindFaders();
   renderPresets();
   renderEq();
-  bindFaders();
   bindMonitor();
   bindFile();
   reflectParams();
@@ -47,17 +118,19 @@ function renderPresets() {
     b.dataset.id = p.id;
     b.innerHTML = `
       <span class="glyph">${PRESET_GLYPH[p.id] ?? "●"}</span>
-      <span class="p-name">${p.nameZh} <small>${p.name}</small></span>
-      <span class="p-sub">${p.hint}</span>
-      <span class="p-vals">P${fmt(p.params.pitch)} T${fmt(p.params.timbre)}</span>`;
+      <span class="p-name">${languageTag === "en" ? p.name : `${p.nameZh} <small>${p.name}</small>`}${p.experimental ? `<em class="exp">${text.experimental()}</em>` : ""}</span>
+      <span class="p-sub">${languageTag === "en" ? EN_HINTS[p.id] ?? "" : p.hint}</span>
+      <span class="p-vals">${p.params.targetF0 ? `F0 ${p.params.targetF0}` : `P${fmt(p.params.pitch)}`} T${fmt(p.params.timbre)}</span>`;
     b.onclick = async () => {
       params = await bridge.applyPreset(p.id);
+      activePreset = p.id;
       reflectParams();
       markPreset(p.id);
+      scheduleSend();
     };
     box.appendChild(b);
   }
-  markPreset("normal");
+  markPreset(activePreset);
 }
 
 function markPreset(id: string) {
@@ -72,45 +145,80 @@ function bindFaders() {
   const pitch = $<HTMLInputElement>("#pitch");
   const timbre = $<HTMLInputElement>("#timbre");
   const strength = $<HTMLInputElement>("#strength");
+  const pitchRange = $<HTMLInputElement>("#pitch-range");
+  const targetF0 = $<HTMLInputElement>("#target-f0");
+  const formantShape = $<HTMLInputElement>("#formant-shape");
+  const speech = $<HTMLInputElement>("#speech");
 
-  // morph params rebuild the engine's streaming stages (~128ms hole):
-  // dragging must only update readouts; commit on release ('change')
+  // Dragging updates local values and readouts; commit on release ('change').
   const on = (commit: boolean) => () => {
     params.pitch = +pitch.value;
     params.timbre = +timbre.value;
     params.strength = +strength.value / 100;
+    params.pitchRange = +pitchRange.value;
+    params.targetF0 = normalizeTargetF0(+targetF0.value, params.targetF0);
+    params.formantShape = +formantShape.value;
     reflectReadouts();
     if (commit) scheduleSend();
   };
-  for (const el of [pitch, timbre, strength]) {
+  for (const el of [pitch, timbre, strength, pitchRange, targetF0, formantShape]) {
     el.addEventListener("input", on(false));
     el.addEventListener("change", on(true));
   }
 
+  speech.addEventListener("change", () => {
+    params.speech = speech.checked;
+    reflectSpeechMode();
+    scheduleSend();
+  });
+
   $("#reset").onclick = () => {
     params.pitch = params.timbre = 0;
     params.strength = 1;
+    params.pitchRange = 1;
+    params.targetF0 = params.formantShape = 0;
     reflectParams();
     scheduleSend();
   };
 
   $("#bypass").addEventListener("click", () => {
     params.bypass = !params.bypass;
-    $("#bypass").setAttribute("aria-pressed", String(params.bypass));
-    $("#bypass").textContent = params.bypass ? "正在旁通" : "旁通原声";
+    reflectParams();
     scheduleSend();
   });
+}
+
+function normalizeTargetF0(value: number, previous: number): number {
+  // Skip the gap in either direction, including when using arrow keys.
+  if (value <= 0) return 0;
+  if (value < 70) return value < previous ? 0 : 70;
+  return Math.round(value);
+}
+
+function reflectSpeechMode() {
+  $<HTMLInputElement>("#speech").checked = params.speech;
+  $<HTMLFieldSetElement>("#speech-controls").disabled = !params.speech;
+  $("#speech-note").textContent = params.speech
+    ? text.speechOn()
+    : text.speechOff();
 }
 
 function reflectReadouts() {
   $("#pitch-val").textContent = fmt(params.pitch);
   $("#timbre-val").textContent = fmt(params.timbre);
   $("#strength-val").textContent = `${Math.round(params.strength * 100)}%`;
-  $("#pitch-note").textContent = `${fmt(params.pitch * 12)} 半音`;
+  $("#pitch-range-val").textContent = `${params.pitchRange.toFixed(2)}×`;
+  $("#target-f0-val").textContent = params.targetF0 === 0 ? text.auto() : `${params.targetF0} Hz`;
+  $("#formant-shape-val").textContent = fmt(params.formantShape);
+  $("#pitch-note").textContent = text.semitones(fmt(params.pitch * 12));
+  $<HTMLInputElement>("#target-f0").setAttribute("aria-valuetext", params.targetF0 === 0 ? text.auto() : `${params.targetF0} Hz`);
   for (const [id, v, lo, hi] of [
     ["#pitch", params.pitch, -1, 1],
     ["#timbre", params.timbre, -1, 1],
     ["#strength", params.strength * 100, 0, 100],
+    ["#pitch-range", params.pitchRange, 0, 1.5],
+    ["#target-f0", params.targetF0, 0, 500],
+    ["#formant-shape", params.formantShape, -1, 1],
   ] as const) {
     const el = $<HTMLInputElement>(id);
     el.style.setProperty("--fill", `${((v - lo) / (hi - lo)) * 100}%`);
@@ -120,6 +228,9 @@ function reflectReadouts() {
 
 function reflectParams() {
   reflectReadouts();
+  reflectSpeechMode();
+  $("#bypass").setAttribute("aria-pressed", String(params.bypass));
+  $("#bypass").textContent = params.bypass ? text.bypassing() : text.bypass();
   syncEqInputs();
 }
 
@@ -173,18 +284,59 @@ function syncEqInputs() {
 }
 
 // ── live monitor ───────────────────────────────────────────────
-let ctx: AudioContext | undefined;
-let stream: MediaStream | undefined;
-let node: AudioWorkletNode | undefined;
 let resultUrl: string | undefined;
-let running = false;
 let outLevel = 0;
 const scopeBuf = new Float32Array(4800);
 
-async function startMonitor() {
-  ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+// The supervisor owns the session's devices and the generation guard:
+// the generation invalidates IPC results still in flight across a
+// stop→restart (a stale reply, including a timed-out call resolving
+// late, can never land on the new session's node), and a session's
+// ctx/stream/node are committed only once its whole start chain has
+// succeeded — see MonitorSupervisor in monitor-queue.ts.
+const monitor = new MonitorSupervisor();
+const MAX_BACKLOG = 8; // queued + in-flight blocks before drop-oldest
+const IPC_TIMEOUT_MS = 1800; // ≫ engine latency (~110ms): one hung processChunk must never stall the queue
+
+interface RtStats {
+  underruns: number;
+  overruns: number;
+  bufferedMs: number;
+}
+let lastStats: RtStats = { underruns: 0, overruns: 0, bufferedMs: 0 };
+
+function showRtStats(s?: RtStats) {
+  const sender = monitor.session?.sender;
+  if (!sender) return; // stopped (or strays from a dead generation)
+  if (s) lastStats = s;
+  const el = $("#rt-stats");
+  el.hidden = false;
+  // end-to-end queue delay ≈ blocks waiting on the send side + the
+  // worklet's play-side ring
+  const queueMs = sender.queueMs + lastStats.bufferedMs;
+  el.title = text.rtTip();
+  el.textContent = text.rtStats(String(lastStats.bufferedMs), String(queueMs), String(lastStats.underruns), String(sender.droppedBlocks), String(lastStats.overruns), String(sender.ipcTimeouts), String(sender.resyncs));
+}
+
+// One start attempt's async chain: every device is LOCAL to `res`
+// until MonitorSupervisor commits it — a failed or superseded attempt
+// releases only what it acquired, never another session's devices.
+async function setupMonitor(
+  res: MonitorResources,
+  streamBase: number,
+  isLive: () => boolean,
+): Promise<void> {
+  const virtual = $<HTMLSelectElement>("#route").value === "virtual";
+  if (virtual) {
+    try { await Morpher.startVirtualMic(streamBase); }
+    catch { throw new Error("voicemorph: route unavailable"); }
+    res.releaseOutput = () => { void Morpher.stopVirtualMic(streamBase).catch(console.error); };
+    if (!isLive()) return;
+  }
+  const ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+  res.ctx = ctx;
   await ctx.audioWorklet.addModule(workletUrl);
-  stream = await navigator.mediaDevices.getUserMedia({
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1,
       echoCancellation: false,
@@ -192,59 +344,110 @@ async function startMonitor() {
       autoGainControl: false,
     },
   });
+  res.stream = stream;
+  if (virtual && stream.getAudioTracks().some((track) => /BlackHole/i.test(track.label))) {
+    throw new Error(text.routeFeedback());
+  }
   const src = ctx.createMediaStreamSource(stream);
-  node = new AudioWorkletNode(ctx, "duplex", { outputChannelCount: [1] });
-  // serialize IPC through a promise chain: every captured block is
-  // sent (dropping whole blocks would punch content holes — deleted
-  // syllables — into the morphed stream)
-  let chain: Promise<void> = Promise.resolve();
+  const node = new AudioWorkletNode(ctx, "duplex", { outputChannelCount: [1] });
+  res.node = node;
+  lastStats = { underruns: 0, overruns: 0, bufferedMs: 0 };
+  // serialize IPC through an explicit pending FIFO drained one call at a
+  // time; every block rides (streamID, seq) — past the bound the OLDEST
+  // unsent block is dropped (fresh speech over stale audio; the Go side
+  // counts the seq hole), and an IPC timeout or a stale rejection resyncs
+  // the sender onto a fresh stream ID instead of feeding a stream whose
+  // tail may already have consumed the abandoned block.
+  const sender = new ChunkSender(
+    {
+      isLive,
+      send: async (streamID, seq, block) => {
+        try {
+          return await bridge.processChunk(streamID, seq, f32ToB64(block));
+        } catch (err) {
+          // Go refused the (stream, seq) pair: translate the protocol
+          // rejection into the sender's resync signal; anything else is
+          // an ordinary IPC failure (drop the block, keep the stream).
+          if (isCallError(err) && err.message.startsWith("voicemorph: stale")) {
+            return STALE;
+          }
+          if (virtual && isLive() && isCallError(err) && err.message.startsWith("voicemorph: virtual output")) {
+            stopMonitor();
+            showMicStatus("routeFailed");
+          }
+          throw err;
+        }
+      },
+      onOutput: (outB64) => {
+        const out = b64ToF32(outB64);
+        outLevel = rms(out);
+        if (!virtual) node.port.postMessage(out, [out.buffer]);
+      },
+      onCounts: () => showRtStats(),
+    },
+    MAX_BACKLOG,
+    IPC_TIMEOUT_MS,
+    streamBase,
+  );
+  res.sender = sender;
   node.port.onmessage = (e) => {
+    if (e.data.stats) {
+      showRtStats(e.data.stats as RtStats);
+      return;
+    }
     const block: Float32Array = e.data.in;
+    if (!block) return;
     feedScope(block);
-    chain = chain.then(async () => {
-      const outB64 = await bridge.processChunk(f32ToB64(block));
-      const out = b64ToF32(outB64);
-      outLevel = rms(out);
-      node?.port.postMessage(out, [out.buffer]);
-    }).catch(() => {}); // keep the chain alive on a failed call
+    sender.push(block);
+    showRtStats();
   };
   src.connect(node);
   node.connect(ctx.destination);
-  await bridge.resetStream();
 }
 
 function stopMonitor() {
-  node?.disconnect();
-  stream?.getTracks().forEach((t) => t.stop());
-  ctx?.close();
-  node = undefined;
-  stream = undefined;
-  ctx = undefined;
+  monitor.stop(); // bumps the generation: queued + in-flight work dies
+  $<HTMLSelectElement>("#route").disabled = false;
+  $("#monitor").textContent = text.monitorStart();
+  $("#monitor").classList.remove("live");
+  $("#rt-stats").hidden = true;
 }
 
 function bindMonitor() {
+  const route = $<HTMLSelectElement>("#route");
+  $("#routing").hidden = !inApp || !state.platform.startsWith("darwin/");
+  route.onchange = () => { $("#route-guide").hidden = route.value !== "virtual"; };
+  $("#blackhole-guide").onclick = () => { void Morpher.blackHoleGuide().catch(console.error); };
+  window.addEventListener("pagehide", stopMonitor);
   $("#monitor").addEventListener("click", async () => {
-    if (running) {
+    if (monitor.running || monitor.pending) {
+      // running → stop; pending → cancel the in-flight start (its
+      // attempt resolves "stale" and releases its own devices)
       stopMonitor();
-      running = false;
-      $("#monitor").textContent = "开始监听";
-      $("#monitor").classList.remove("live");
-      $("#mic-status").textContent = "麦克风未开启";
+      showMicStatus("off");
       return;
     }
     try {
-      await startMonitor().catch((err) => {
-        stopMonitor(); // release mic/graph if setup died midway
-        throw err;
+      route.disabled = true;
+      $("#monitor").textContent = text.monitorStarting(); // click again to cancel
+      const r = await monitor.start({
+        resetStream: () => bridge.resetStream(),
+        setup: setupMonitor,
       });
-      running = true;
-      $("#monitor").textContent = "停止监听";
+      // busy = a start is already in flight (double click);
+      // stale = stop() raced in mid-setup and the attempt released itself
+      if (r !== "started") {
+        $("#monitor").textContent = text.monitorStart();
+        return;
+      }
+      $("#monitor").textContent = text.monitorStop();
       $("#monitor").classList.add("live");
-      $("#mic-status").textContent = inApp
-        ? "监听中 — 说话试试"
-        : "浏览器预览：音频原样返回（无 Go 引擎）";
+      showMicStatus(route.value === "virtual" ? "virtual" : inApp ? "on" : "mock");
+      showRtStats();
     } catch (err) {
-      $("#mic-status").textContent = `麦克风不可用：${(err as Error).message}`;
+      route.disabled = false;
+      $("#monitor").textContent = text.monitorStart();
+      showMicStatus((err as Error).message === "voicemorph: route unavailable" ? "routeFailed" : "error", (err as Error).message);
     }
   });
 }
@@ -292,7 +495,6 @@ function bindFile() {
   dz.ondragleave = () => dz.classList.remove("drag");
   dz.ondrop = (e) => {
     e.preventDefault();
-    dz.classList.remove("drag");
     const f = e.dataTransfer?.files[0];
     if (f) void morphFile(f);
   };
@@ -307,6 +509,7 @@ async function morphFile(file: File) {
   const result = $("#file-result");
   dz_busy(true);
   try {
+    if (!inApp) throw new Error(text.fileDesktopOnly());
     const raw = await file.arrayBuffer();
     // decode any audio format with Web Audio, resample to 48 kHz mono WAV
     const ac = new AudioContext();
@@ -320,19 +523,22 @@ async function morphFile(file: File) {
     const rendered = await off.startRendering();
     const mono = rendered.getChannelData(0);
     const wav = encodeWav16(mono, 48000);
-    const out = await bridge.processFile(b64Encode(wav));
-    if (!out.wav) throw new Error("引擎未返回音频（浏览器预览模式）");
-    const wavBytes = b64ToBytes(out.wav);
-    const blob = new Blob([wavBytes.buffer as ArrayBuffer], { type: "audio/wav" });
+    const parts: Uint8Array[] = [];
+    const chunks = new Channel<string>((chunk) => parts.push(b64ToBytes(chunk)));
+    const done = bridge.processFile(b64Encode(wav), chunks);
+    const out = await done;
+    if (parts.length === 0) throw new Error(text.fileEmpty());
+    const blob = new Blob(parts.map((part) => new Uint8Array(part).buffer as ArrayBuffer), { type: "audio/wav" });
     resultUrl?.startsWith("blob:") && URL.revokeObjectURL(resultUrl);
     const url = URL.createObjectURL(blob);
     resultUrl = url;
     $<HTMLAudioElement>("#result-player").src = url;
     $<HTMLAnchorElement>("#download").href = url;
     result.hidden = false;
-    $("#mic-status").textContent = `已处理 ${out.seconds.toFixed(1)}s（${out.inHz}→${out.outHz} Hz）`;
+    fileSummary = { seconds: out.seconds.toFixed(1), input: String(out.inHz), output: String(out.outHz) };
+    showMicStatus("fileDone");
   } catch (err) {
-    $("#mic-status").textContent = `处理失败：${(err as Error).message}`;
+    showMicStatus("fileError", (err as Error).message);
   } finally {
     dz_busy(false);
   }
@@ -379,7 +585,7 @@ function encodeWav16(samples: Float32Array, sr: number): Uint8Array {
   v.setUint32(16, 16, true);
   v.setUint16(20, 1, true);
   v.setUint16(22, 1, true);
-  v.setUint32(24, sr, true);
+  v.setUint16(24, sr, true);
   v.setUint32(28, sr * 2, true);
   v.setUint16(32, 2, true);
   v.setUint16(34, 16, true);

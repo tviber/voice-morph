@@ -1,8 +1,22 @@
 # VoiceMorph 变声工坊
 
-MorphVOX Pro 风格的实时变声器 —— Go DSP 引擎 + Web 前端 + MyGo 桌面壳。
+一款专注于实时监听和音频文件变声的桌面软件 —— Go DSP 引擎 + Web 前端 + MyGo 桌面壳。
 
 ![tech](https://img.shields.io/badge/stack-Go%201.27%20%C2%B7%20MyGo%20%C2%B7%20Bun%2FVite%20%C2%B7%20WebAudio-d97757)
+
+## 在 OBS、screenframes、会议软件里使用变声麦克风
+
+1. 在 macOS 13 或更新版本上安装 [BlackHole 2ch](https://existential.audio/blackhole/)。安装后重新打开 VoiceMorph 和录制软件。
+2. 在 macOS「声音 → 输入」选择实体麦克风。打开 VoiceMorph，在「信号 → 输出到」选择 **BlackHole 2ch**，选好预设后点击「开始监听」。
+3. 在 OBS 添加「音频输入采集」，或在 screenframes、会议软件的麦克风设置中选择 **BlackHole 2ch**。关闭录制软件里的其他麦克风轨，以免同时录入原声。先试录一句并回放检查。
+
+VoiceMorph 单独向虚拟设备写入处理后的双声道音频，系统输出仍可用耳机播放其他声音。要在本机试听，停止监听后将输出改为耳机。BlackHole 由用户从官方渠道单独安装。
+
+录课可以从 **温暖讲堂**（长课）、**清晰演示**（操作解说）、**沉稳旁白**（后期讲解）或 **轻松对谈**（问答）开始。这四套预设跟随说话人的音域，轻调音高、共振峰和均衡。熟悉你的人仍可能通过口音、语调或用词认出你。
+
+## 下载和许可
+
+[GitHub Releases](https://github.com/tviber/voice-morph/releases) 提供 macOS 通用 DMG、Windows 安装程序，以及 Linux 的 DEB、RPM 和 tar.gz。Windows 和 Linux 均支持 x64 与 ARM64。每个版本附带 `SHA256SUMS`。当前自动构建的 macOS 包使用 ad-hoc 签名，Windows 包未签名。源码可查阅和自用修改，允许使用软件制作收费课程和商业视频；再分发软件、转售或托管服务需要书面授权。完整条款见 [LICENSE](LICENSE)。
 
 ## MorphVOX Pro 的调参模型（分析）
 
@@ -17,12 +31,40 @@ MorphVOX Pro 的核心是 Tweak Panel 上的三个参数 + 两段 EQ：
 
 官方预设的数值印证了这个拆分：`低沉 (-0.5, 0, 100%)` 只降调门；`巨人 (-0.5, -0.3, 100%)` 降调门**且**下移共振峰；`小孩 (+0.8, +0.4, 100%)` 两者同时抬升。**Pitch 改变"调"，Timbre 改变"嗓子的体格"** —— 两者正交，这就是 MorphVOX 声音塑造的全部秘密。
 
+## 语音模式（speech path）
+
+MorphVOX 的重采样 + WSOLA 路径把整段音频一起变速：辅音、呼吸和停顿会被同样升降调，听感偏"乐器"。新增的**语音模式**只对有声段做音高变换：
+
+```
+输入 ──> PitchTracker(YIN) ──> 浊音帧 → 1:1 TD-PSOLA ──> 谱包络
+                                (清音/气声原样透传)      非均匀声道扭曲 ──> 输出
+```
+
+- **PitchTracker**（`engine/pitch.go`）：YIN 式估计器，搜索 60–600 Hz，缓冲区分配后复用。语音音高路径使用 32 ms 分析帧，浊音段使用前帧音高提示与滞回阈值，减少气声、声带低频振动时的跟踪中断。
+- **TD-PSOLA**（`engine/speech_pitch.go`）：固定 hop 网格上按 `logF0_out = center + pitch·ln2 + pitchRange·(logF0 − mu)` 映射音高，`pitchRange` 在 ±4 半音内保持线性、极端偏差软限制在 ±8 半音；`mu` 是源音高的滑动中位数，`center` 默认跟随它，也可由 `targetF0` 指定。强降调（目标 < 一半音高）时 grain 窗宽增至 0.6·目标周期并保留 0.4 窗底（窗尾环绕读取原脉冲主体并按能量归一），保证 overlap-add 无零覆盖空洞，同时保留目标周期脉冲作为低音高提示。音高阶段对清音保留干声，共振峰阶段仍会对清音做较弱的包络调整。
+- **谱包络非均匀扭曲**（`engine/formant_shape.go`）：在 `Timbre` 的全局缩放之上叠加 `FormantShape`（−1 厚实 → +1 明亮），通过分段 log 频率映射对 F1/F2 区域施加不同修正。这是声道形状的近似，尚未通过真实儿童目标语音验证。
+
+参数：`speech` 开关、`pitchRange`（0–1.5，1 保持语调）、`targetF0`（70–500 Hz 目标音高中心，0 = 跟随输入；设置后仍叠加 `pitch`）、`formantShape`（−1..1）。两个新增预设 `natural-woman` / `natural-child` 走语音路径并标记为 **experimental**（UI 显示"实验"徽标），待跨说话人盲听验证后转正；旧的 `woman`/`child` 仍走原路径。前端顶部的“语音模式”开关控制三个对应滑杆是否可用。预设名称表示目标，不保证转换后的听感自然；本次试听仍发现部分 DSP 样本存在电音和机械音，相关结论见下文实验记录。
+
+## 离线评测 `voice-eval`
+
+`cmd/voice-eval` 是纯 Go 的离线评测器：把一段 WAV 跑过任意预设或自定义参数，渲染 WAV、产出 JSON 报告（RMS/峰值/浊音率/各分位 F0）、可选生成盲听页或 CSV，并可与外部参考（如 Praat 目标音）对比。不依赖 Python 或网络。评测指标直接复用生产 `engine.PitchTracker`，所以报告与监听路径看到的是同一套音高估计。
+
+```bash
+go build ./cmd/voice-eval
+./voice-eval -in testdata/cmu-arctic-slt-a0003.wav -preset all -report out/report.json -blind out/index.html
+./voice-eval -list-presets            # 列出预设 ID
+```
+
+`testdata/` 附带两条 CMU Arctic 真实语音（`aew` 男声、`slt` 女声；许可见 `cmu_arctic_COPYING.txt`，来源与署名见 `testdata/README.md`）。评测脚本与指标定义见 `docs/evaluation.md`；仓库外还做过一次 DSP 与 Seed-VC 神经转换的盲听对比，结论见 `docs/neural-vc-evaluation.md`。
+
 ## 实现方式
 
 ```
 mic/WebAudio ──┐
                ├─ pre-EQ ── 重采样(1/r) ── WSOLA(α=1/r) ── 共振峰偏移 ── post-EQ ── 增益/软限幅 ──> 输出
-audio file ────┘        └────── Pitch = resample+WSOLA 复合 ──────┘   └── Timbre = 倒谱谱包络扭曲 ──┘
+audio file ────┤        └────── Pitch = resample+WSOLA 复合 ──────┘   └── Timbre = 倒谱谱包络扭曲 ──┘
+               └─ 语音模式 ── PitchTracker ── TD-PSOLA(浊音) ── 非均匀谱包络扭曲 ──> 同上后级
 ```
 
 - **Pitch**：正向重采样把"声带+声道"一起变速（基频和共振峰同倍率缩放），WSOLA 时域分析-合成恢复时长，净效果即音高平移。
@@ -34,40 +76,45 @@ audio file ────┘        └────── Pitch = resample+WSOLA �
 
 ```
 main.go            Morpher 服务（IPC 绑定）+ 窗口入口
-engine/            DSP 引擎：fft / resample / wsola / formant / eq / wav / presets
+engine/            DSP 引擎：engine / eq / fft / formant / formant_shape /
+                   pitch / presets / resample / speech_chain / speech_pitch /
+                   wav / wsola
+cmd/voice-eval/    离线评测 CLI：渲染 WAV + JSON 报告 + 盲听页
+evaluation/        评测指标与报告生成（与引擎同一 PitchTracker）
+testdata/          两条 CMU Arctic 真实语音（含许可证与来源说明）
+docs/              evaluation.md 与神经变声对比实验记录
 src/               前端（Vite + TS）：main.ts UI 逻辑、bridge.ts IPC/mock、style.css
 public/worklet.js  AudioWorklet：采集 2048 采样块 ↔ 播放回写
-index.html         Claude 风格布局（暖纸底 + 衬线 + 珊瑚橙）
+index.html         实时变声与音频文件变声界面
 mygo.config.ts     macOS 打包配置（universal = intel + Apple Silicon）
 ```
 
 ## 构建 macOS 版（Intel + M 芯片通用包）
 
-前置：Go ≥ 1.25、bun（或 npm）。在 Mac 上：
+前置：Go ≥ 1.27.3、Bun。MyGo Go 库、CLI 和前端 runtime 均固定在 0.10.0。在 Mac 上：
 
 ```bash
 bun install
-go run github.com/egoist/mygo/cmd/mygo@latest generate   # 生成 src/mygo.ts 绑定
-bun run build:web                                        # 前端 → dist/
-go run github.com/egoist/mygo/cmd/mygo@latest build -platform darwin/universal
-# 产物：build/VoiceMorph.app + .dmg（arm64+amd64 lipo 合一，需 macOS 上运行 lipo/签名）
+bun run generate                   # 生成 src/mygo.ts、src/locales.ts 和 Go 语言目录
+bun run build:web                  # 前端 → dist/
+bun run build -platform darwin/universal
+# 产物：build/ 下的 macOS 应用与安装包（universal 合并 arm64 和 amd64）
 ```
 
-非 Mac 机器也可 `GOOS=darwin go build` 交叉验证二进制（本项目已是纯 Go 无依赖）。
+本地包默认使用 ad-hoc 签名。对外发布时按 [签名及发布步骤](docs/release.md) 使用 Developer ID 并经 Apple 公证。
 
 ## 开发
 
 ```bash
 bun run dev:web                 # vite dev server，浏览器打开即看 UI（mock 引擎）
 bun run typecheck               # tsc
-CGO_ENABLED=0 go test ./engine/ # DSP 单测：正弦音高平移/恒等、共振峰上移、EQ、WAV、流式=整段
-go vet ./engine/
+CGO_ENABLED=0 go test ./...     # 引擎 + 评测单测（音高/PSOLA/共振峰/EQ/WAV/指标）
+go run github.com/egoist/mygo/cmd/mygo vet .
+bun test                        # 前端流式队列 / monitor 生命周期测试
 ```
 
-浏览器预览模式下桥接层自动降级为 mock（音频原样返回），方便只调样式。
+浏览器预览模式下实时监听降级为 mock（音频原样返回），文件变声需要桌面版。桌面版使用 Web Audio 解码音频输入并输出 48 kHz WAV。界面支持简体中文和英文，语言目录位于 `locales/`，MyGo 负责在桌面版保存语言选择。
 
 ## 预留但暂未实现
 
-- Windows / Linux 打包（mygo `-platform windows|linux`；代码本身无平台依赖，WebAudio 路径通用）
-- 系统级虚拟麦克风（把变声输出喂给其它应用）—— 需要 VB-Cable/BlackHole 类内核驱动，超出纯 Go webview 范围
 - 降噪门、Voice Doctor 向导、回声/键盘音效
